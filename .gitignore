@@ -9,6 +9,7 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+node_modules/
 develop-eggs/
 dist/
 downloads/
@@ -154,3 +155,8 @@ Thumbs.db
 # Root secret file
 /Secrets
 /Secrets 260327
+
+# App data
+.data/
+*.sqlite
+*.sqlite-*

@@ -8,7 +8,8 @@ IV = EPS × (P/E_no_growth + g × Growth%) × (Avg_AAA_Yield / Bond_Yield)
 
 ## Stack
 - React + Vite (frontend, Tailwind for styling)
-- Express (serves built SPA + `/api/prices` Polygon proxy)
+- Express (serves built SPA + SQLite-backed REST API + `/api/prices` Polygon proxy)
+- SQLite via `better-sqlite3` for persisted watchlist and formula variables
 - Fly.io (single shared-CPU 256MB machine)
 
 ## Local development
@@ -20,6 +21,7 @@ npm run dev
 ```
 
 This runs Vite (port 5173) and Express (port 8080) concurrently. The Vite dev server proxies `/api/*` to Express.
+In local development, SQLite data is stored in `.data/fair-value.sqlite`. Set `SQLITE_DB_PATH=/absolute/path/to/file.sqlite` if you need a different database file.
 
 Visit http://localhost:5173
 
@@ -52,6 +54,7 @@ Launch the app (first deploy):
 
 ```bash
 fly launch --no-deploy --copy-config --name fair-value-evaluator
+fly volumes create fair_value_data --region iad --size 1 --app fair-value-evaluator
 fly secrets set POLYGON_API_KEY=your_polygon_key_here
 fly deploy
 ```
@@ -87,6 +90,8 @@ If you want auto-deploy on every `git push`, add a GitHub Action — Fly publish
 fair-value-evaluator/
 ├── src/
 │   ├── App.jsx          # Main React component
+│   ├── lib/
+│   │   └── defaultData.js # Shared seed stocks + default formula globals
 │   ├── main.jsx         # React entry
 │   └── index.css        # Tailwind + global styles
 ├── server/
@@ -103,13 +108,23 @@ fair-value-evaluator/
 
 ## Data persistence
 
-User edits (tickers, scores, growth rates, formula globals) are saved to **localStorage** in the browser. This means:
+User edits (tickers, scores, growth rates, current prices, update dates, and formula globals) are saved to a server-side SQLite database through REST endpoints:
 
-- Edits persist across page refreshes ✓
-- Edits are per-browser, per-device — no cloud sync
-- Clearing browser data resets to seed values
+- `GET /api/data`
+- `POST /api/stocks`
+- `PUT /api/stocks/:ticker`
+- `DELETE /api/stocks/:ticker`
+- `PUT /api/globals`
 
-If you want cross-device sync later, swap the `localStorage` calls in `src/App.jsx` for a small REST endpoint backed by SQLite or Fly's volume mounts.
+The database is initialized on server startup. Empty tables are seeded from `src/lib/defaultData.js`.
+
+In production, the SQLite file lives at `/data/fair-value.sqlite`. Provision the Fly volume before deploying:
+
+```bash
+fly volumes create fair_value_data --region iad --size 1 --app fair-value-evaluator
+```
+
+The `fly.toml` mount maps that volume to `/data`, so the watchlist survives app restarts and deployments.
 
 ## Polygon API
 

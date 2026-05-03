@@ -1,26 +1,6 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { TrendingUp, Plus, Trash2, RefreshCw, Calculator, Target, Settings } from "lucide-react";
-
-const DEFAULT_GLOBALS = { peNoGrowth: 7, g: 1, avgYieldAAA: 4.4, bondYield: 4.40 };
-
-const SEED_STOCKS = [
-  { ticker: "META",  ttmEPS: 30.58, growth: 25, currentPrice: 669.12,  updated: "4/29/26", valuation: 20, growthScore: 16, moat: 17, executionRisk: 8,  economy: 21 },
-  { ticker: "VOO",   ttmEPS: 31.24, growth: 13, currentPrice: 654.24,  updated: "4/28/26", valuation: 14, growthScore: 16, moat: 20, executionRisk: 10, economy: 21 },
-  { ticker: "NVDA",  ttmEPS: 4.93,  growth: 40, currentPrice: 209.25,  updated: "4/24/26", valuation: 15, growthScore: 18, moat: 18, executionRisk: 8,  economy: 21 },
-  { ticker: "QQQ",   ttmEPS: 27.94, growth: 15, currentPrice: 661.57,  updated: "4/28/26", valuation: 13, growthScore: 18, moat: 20, executionRisk: 10, economy: 21 },
-  { ticker: "TSM",   ttmEPS: 12.02, growth: 25, currentPrice: 393.83,  updated: "4/24/26", valuation: 14, growthScore: 18, moat: 19, executionRisk: 8,  economy: 21 },
-  { ticker: "MU",    ttmEPS: 21.92, growth: 20, currentPrice: 518.46,  updated: "4/24/26", valuation: 16, growthScore: 16, moat: 15, executionRisk: 8,  economy: 21 },
-  { ticker: "HOOD",  ttmEPS: 2.07,  growth: 28, currentPrice: 71.20,   updated: "4/29/26", valuation: 14, growthScore: 18, moat: 16, executionRisk: 7,  economy: 21 },
-  { ticker: "BRK.B", ttmEPS: 20.62, growth: 15, currentPrice: 475.38,  updated: "4/24/26", valuation: 14, growthScore: 14, moat: 17, executionRisk: 9,  economy: 21 },
-  { ticker: "MS",    ttmEPS: 11.04, growth: 15, currentPrice: 187.08,  updated: "4/24/26", valuation: 18, growthScore: 13, moat: 16, executionRisk: 7,  economy: 21 },
-  { ticker: "MSFT",  ttmEPS: 16.19, growth: 20, currentPrice: 424.46,  updated: "4/29/26", valuation: 14, growthScore: 14, moat: 17, executionRisk: 9,  economy: 21 },
-  { ticker: "SCHW",  ttmEPS: 5.27,  growth: 15, currentPrice: 91.16,   updated: "4/24/26", valuation: 18, growthScore: 14, moat: 14, executionRisk: 8,  economy: 21 },
-  { ticker: "SOFI",  ttmEPS: 0.44,  growth: 30, currentPrice: 15.53,   updated: "4/29/26", valuation: 14, growthScore: 17, moat: 15, executionRisk: 8,  economy: 21 },
-  { ticker: "ASML",  ttmEPS: 30.04, growth: 25, currentPrice: 1394.08, updated: "4/24/26", valuation: 10, growthScore: 15, moat: 19, executionRisk: 9,  economy: 21 },
-  { ticker: "COF",   ttmEPS: 19.71, growth: 7,  currentPrice: 190.84,  updated: "4/24/26", valuation: 20, growthScore: 12, moat: 14, executionRisk: 7,  economy: 21 },
-  { ticker: "UNH",   ttmEPS: 16.34, growth: 15, currentPrice: 370.74,  updated: "4/24/26", valuation: 14, growthScore: 14, moat: 16, executionRisk: 9,  economy: 21 },
-  { ticker: "BAC",   ttmEPS: 3.83,  growth: 10, currentPrice: 52.88,   updated: "4/24/26", valuation: 17, growthScore: 13, moat: 14, executionRisk: 8,  economy: 21 },
-];
+import { DEFAULT_GLOBALS, SEED_STOCKS } from "./lib/defaultData.js";
 
 const calcIV = (eps, growth, g) => eps * (g.peNoGrowth + g.g * growth) * (g.avgYieldAAA / g.bondYield);
 const calcPctIV = (price, iv) => (iv > 0 ? (price / iv) * 100 : 0);
@@ -53,6 +33,29 @@ const scoreColor = (s) =>
   s >= 80 ? "bg-emerald-500 text-emerald-950"
   : s >= 75 ? "bg-emerald-400 text-emerald-950"
   : s >= 65 ? "bg-amber-400 text-amber-950" : "bg-zinc-600 text-zinc-200";
+
+async function apiRequest(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+
+  const res = await fetch(url, { ...options, headers });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  return data;
+}
+
+function todayShort() {
+  return new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit" });
+}
+
+function nextNewTicker(stocks) {
+  const existing = new Set(stocks.map((stock) => stock.ticker));
+  if (!existing.has("NEW")) return "NEW";
+  let index = 2;
+  while (existing.has(`NEW${index}`)) index += 1;
+  return `NEW${index}`;
+}
 
 function NumCell({ value, onChange, decimals = 2, max, suffix = "", width = "w-20" }) {
   const [editing, setEditing] = useState(false);
@@ -102,32 +105,55 @@ function TextCell({ value, onChange, width = "w-20", uppercase = false }) {
 }
 
 export default function App() {
-  const [stocks, setStocks] = useState(() => {
-    try { const v = localStorage.getItem("fve:stocks"); return v ? JSON.parse(v) : SEED_STOCKS; } catch { return SEED_STOCKS; }
-  });
-  const [globals, setGlobals] = useState(() => {
-    try { const v = localStorage.getItem("fve:globals"); return v ? JSON.parse(v) : DEFAULT_GLOBALS; } catch { return DEFAULT_GLOBALS; }
-  });
+  const [stocks, setStocks] = useState([]);
+  const [globals, setGlobalsState] = useState(DEFAULT_GLOBALS);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [dataError, setDataError] = useState("");
   const [tab, setTab] = useState("scorecard");
   const [sortBy, setSortBy] = useState("score");
   const [sortDir, setSortDir] = useState("desc");
-  const [storageStatus, setStorageStatus] = useState("idle");
+  const [storageStatus, setStorageStatus] = useState("loading");
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const statusTimer = useRef(null);
+
+  const markSaved = () => {
+    setStorageStatus("saved");
+    if (statusTimer.current) clearTimeout(statusTimer.current);
+    statusTimer.current = setTimeout(() => setStorageStatus("idle"), 1500);
+  };
+
+  const showSaveError = (message) => {
+    setStorageStatus("error");
+    setRefreshMsg(`Save failed: ${message}`);
+    if (statusTimer.current) clearTimeout(statusTimer.current);
+    statusTimer.current = setTimeout(() => setRefreshMsg(""), 5000);
+  };
+
+  const loadData = async () => {
+    setDataLoading(true);
+    setDataError("");
+    setStorageStatus("loading");
+    try {
+      const data = await apiRequest("/api/data");
+      setStocks(Array.isArray(data.stocks) ? data.stocks : SEED_STOCKS);
+      setGlobalsState({ ...DEFAULT_GLOBALS, ...(data.globals || {}) });
+      setStorageStatus("idle");
+    } catch (error) {
+      setDataError(error.message);
+      setStorageStatus("error");
+    } finally {
+      setDataLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      try {
-        setStorageStatus("saving");
-        localStorage.setItem("fve:stocks", JSON.stringify(stocks));
-        localStorage.setItem("fve:globals", JSON.stringify(globals));
-        setStorageStatus("saved");
-        setTimeout(() => setStorageStatus("idle"), 1500);
-      } catch { setStorageStatus("error"); }
-    }, 600);
-    return () => clearTimeout(t);
-  }, [stocks, globals]);
+    loadData();
+    return () => {
+      if (statusTimer.current) clearTimeout(statusTimer.current);
+    };
+  }, []);
 
   const rows = useMemo(() => stocks.map((s) => {
     const iv = calcIV(s.ttmEPS, s.growth, globals);
@@ -147,13 +173,75 @@ export default function App() {
     return arr;
   }, [rows, sortBy, sortDir]);
 
-  const updateStock = (idx, patch) => setStocks((p) => { const n = [...p]; n[idx] = { ...n[idx], ...patch }; return n; });
-  const removeStock = (idx) => setStocks((p) => p.filter((_, i) => i !== idx));
-  const addStock = () => setStocks((p) => [...p, {
-    ticker: "NEW", ttmEPS: 1, growth: 10, currentPrice: 10,
-    updated: new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit" }),
-    valuation: 10, growthScore: 10, moat: 10, executionRisk: 5, economy: 15,
-  }]);
+  const updateStock = async (idx, patch) => {
+    const current = stocks[idx];
+    if (!current) return;
+
+    setStorageStatus("saving");
+    try {
+      const saved = await apiRequest(`/api/stocks/${encodeURIComponent(current.ticker)}`, {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      });
+      setStocks((prev) => prev.map((stock, stockIdx) => (
+        stockIdx === idx || stock.ticker === current.ticker ? saved : stock
+      )));
+      markSaved();
+    } catch (error) {
+      showSaveError(error.message);
+    }
+  };
+
+  const removeStock = async (idx) => {
+    const current = stocks[idx];
+    if (!current) return;
+
+    setStorageStatus("saving");
+    try {
+      await apiRequest(`/api/stocks/${encodeURIComponent(current.ticker)}`, { method: "DELETE" });
+      setStocks((prev) => prev.filter((_, stockIdx) => stockIdx !== idx));
+      markSaved();
+    } catch (error) {
+      showSaveError(error.message);
+    }
+  };
+
+  const addStock = async () => {
+    const stock = {
+      ticker: nextNewTicker(stocks), ttmEPS: 1, growth: 10, currentPrice: 10,
+      updated: todayShort(),
+      valuation: 10, growthScore: 10, moat: 10, executionRisk: 5, economy: 15,
+    };
+
+    setStorageStatus("saving");
+    try {
+      const saved = await apiRequest("/api/stocks", {
+        method: "POST",
+        body: JSON.stringify(stock),
+      });
+      setStocks((prev) => [...prev, saved]);
+      markSaved();
+    } catch (error) {
+      showSaveError(error.message);
+    }
+  };
+
+  const setGlobals = async (updater) => {
+    const next = typeof updater === "function" ? updater(globals) : updater;
+    setGlobalsState(next);
+    setStorageStatus("saving");
+    try {
+      const saved = await apiRequest("/api/globals", {
+        method: "PUT",
+        body: JSON.stringify(next),
+      });
+      setGlobalsState(saved);
+      markSaved();
+    } catch (error) {
+      showSaveError(error.message);
+    }
+  };
+
   const sortToggle = (col) => {
     if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortBy(col); setSortDir("desc"); }
@@ -173,12 +261,23 @@ export default function App() {
         throw new Error(err.error || `HTTP ${res.status}`);
       }
       const priceMap = await res.json();
-      const today = new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit" });
-      setStocks((prev) => prev.map((s) => {
-        const p = priceMap[s.ticker] ?? priceMap[s.ticker.replace(".", "")];
-        return p ? { ...s, currentPrice: parseFloat(p), updated: today } : s;
-      }));
-      setRefreshMsg(`Updated ${Object.keys(priceMap).length}/${stocks.length} prices`);
+      const today = todayShort();
+      const updates = stocks
+        .map((stock) => {
+          const price = priceMap[stock.ticker] ?? priceMap[stock.ticker.replace(".", "")];
+          return price ? { stock, patch: { currentPrice: parseFloat(price), updated: today } } : null;
+        })
+        .filter(Boolean);
+
+      const savedStocks = await Promise.all(updates.map(({ stock, patch }) => (
+        apiRequest(`/api/stocks/${encodeURIComponent(stock.ticker)}`, {
+          method: "PUT",
+          body: JSON.stringify(patch),
+        }).then((saved) => ({ oldTicker: stock.ticker, saved }))
+      )));
+      const savedByTicker = new Map(savedStocks.map(({ oldTicker, saved }) => [oldTicker, saved]));
+      setStocks((prev) => prev.map((stock) => savedByTicker.get(stock.ticker) || stock));
+      setRefreshMsg(`Updated ${savedStocks.length}/${stocks.length} prices`);
     } catch (e) {
       setRefreshMsg(`Refresh failed: ${e.message}`);
     } finally {
@@ -212,6 +311,7 @@ export default function App() {
             </div>
             <div className="flex items-center gap-2">
               <div className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
+                {storageStatus === "loading" && "Loading…"}
                 {storageStatus === "saving" && "Saving…"}
                 {storageStatus === "saved" && "✓ Saved"}
                 {storageStatus === "error" && "⚠ Save failed"}
@@ -220,7 +320,7 @@ export default function App() {
                 className="px-3 py-2 rounded border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900 text-xs flex items-center gap-2 transition">
                 <Settings className="w-3.5 h-3.5" /> Settings
               </button>
-              <button onClick={refreshPrices} disabled={refreshing}
+              <button onClick={refreshPrices} disabled={refreshing || dataLoading || !!dataError}
                 className="px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-400 text-emerald-950 text-xs flex items-center gap-2 transition disabled:opacity-60 font-medium">
                 <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
                 {refreshing ? "Refreshing…" : "Refresh Prices"}
@@ -278,7 +378,8 @@ export default function App() {
               </button>
             ))}
             <div className="ml-auto flex items-center">
-              <button onClick={addStock} className="text-xs text-emerald-300 hover:text-emerald-200 px-3 py-2 flex items-center gap-1.5">
+              <button onClick={addStock} disabled={dataLoading || !!dataError}
+                className="text-xs text-emerald-300 hover:text-emerald-200 px-3 py-2 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed">
                 <Plus className="w-3.5 h-3.5" /> Add Ticker
               </button>
             </div>
@@ -286,9 +387,22 @@ export default function App() {
         </div>
 
         <main className="max-w-[1500px] mx-auto px-6 py-6">
-          {tab === "scorecard" && <ScoreCardTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
-          {tab === "intrinsic" && <IntrinsicTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} globals={globals} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
-          {tab === "allocation" && <AllocationTable rows={sorted} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
+          {dataLoading && <StatePanel title="Loading watchlist" message="Reading stocks and formula variables from the server database." />}
+          {!dataLoading && dataError && (
+            <StatePanel
+              title="Unable to load saved data"
+              message={`The server database could not be reached: ${dataError}`}
+              actionLabel="Retry"
+              onAction={loadData}
+            />
+          )}
+          {!dataLoading && !dataError && (
+            <>
+              {tab === "scorecard" && <ScoreCardTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
+              {tab === "intrinsic" && <IntrinsicTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} globals={globals} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
+              {tab === "allocation" && <AllocationTable rows={sorted} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
+            </>
+          )}
 
           <div className="mt-8 text-[10px] text-zinc-600 font-mono leading-relaxed">
             <p>Scoring rubric (max 100): Valuation 20 · Growth 20 · Moat 20 · Execution Risk 10 · Economy 30. Score ≥75 = potential buy.</p>
@@ -311,12 +425,37 @@ function Stat({ label, value, sub, tone = "zinc" }) {
   );
 }
 
+function StatePanel({ title, message, actionLabel, onAction }) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-6 py-10 text-center">
+      <div className="font-display text-xl font-bold text-zinc-100">{title}</div>
+      <p className="mt-2 text-sm text-zinc-500">{message}</p>
+      {actionLabel && (
+        <button onClick={onAction}
+          className="mt-5 px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-400 text-emerald-950 text-xs font-medium transition">
+          {actionLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function SortHeader({ col, label, sortBy, sortDir, sortToggle, align = "right" }) {
   const active = sortBy === col;
   return (
     <th className={`px-2 py-2 text-${align} text-[10px] uppercase tracking-wider font-medium text-zinc-500 hover:text-zinc-200 cursor-pointer select-none`} onClick={() => sortToggle(col)}>
       <span className="inline-flex items-center gap-1">{label}{active && <span className="text-emerald-400">{sortDir === "desc" ? "▼" : "▲"}</span>}</span>
     </th>
+  );
+}
+
+function EmptyTableRow({ colSpan, message }) {
+  return (
+    <tr>
+      <td colSpan={colSpan} className="px-4 py-10 text-center text-xs text-zinc-500 font-mono">
+        {message}
+      </td>
+    </tr>
   );
 }
 
@@ -346,7 +485,7 @@ function ScoreCardTable({ rows, updateStock, removeStock, stocks, sortBy, sortDi
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {rows.length === 0 ? <EmptyTableRow colSpan={9} message="No stocks tracked. Add a ticker to start the watchlist." /> : rows.map((r) => {
               const idx = stocks.findIndex((s) => s.ticker === r.ticker);
               return (
                 <tr key={r.ticker} className="hairline hover:bg-zinc-900/30 group">
@@ -400,7 +539,7 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {rows.length === 0 ? <EmptyTableRow colSpan={8} message="No stocks tracked. Add a ticker to calculate intrinsic value." /> : rows.map((r) => {
               const idx = stocks.findIndex((s) => s.ticker === r.ticker);
               return (
                 <tr key={r.ticker} className="hairline hover:bg-zinc-900/30 group">
@@ -448,7 +587,7 @@ function AllocationTable({ rows, sortBy, sortDir, sortToggle }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {rows.length === 0 ? <EmptyTableRow colSpan={6} message="No stocks tracked. Add a ticker to generate allocation signals." /> : rows.map((r) => (
               <tr key={r.ticker} className="hairline hover:bg-zinc-900/30">
                 <td className="px-3 py-2 font-mono font-medium">{r.ticker}</td>
                 <td className="px-2 py-2 text-right">

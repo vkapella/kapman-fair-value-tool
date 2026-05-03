@@ -161,13 +161,18 @@ export default function App() {
     const pctIV = calcPctIV(s.currentPrice, iv);
     const score = calcScore(s);
     const sig = allocationSignals(s, iv, pctIV, score);
-    return { ...s, iv, pctIV, score, ...sig };
-  }), [stocks, globals]);
+    const pe = s.ttmEPS > 0 ? s.currentPrice / s.ttmEPS : null;
+    const forwardEps = yahooData[s.ticker]?.forwardEps ?? null;
+    return { ...s, pe, forwardEps, iv, pctIV, score, ...sig };
+  }), [stocks, globals, yahooData]);
 
   const sorted = useMemo(() => {
     const arr = [...rows];
     arr.sort((a, b) => {
       const av = a[sortBy], bv = b[sortBy];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
       if (typeof av === "string") return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
       return sortDir === "asc" ? av - bv : bv - av;
     });
@@ -425,7 +430,6 @@ export default function App() {
                   sortBy={sortBy}
                   sortDir={sortDir}
                   sortToggle={sortToggle}
-                  yahooData={yahooData}
                 />
               )}
               {tab === "allocation" && <AllocationTable rows={sorted} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
@@ -542,7 +546,7 @@ function ScoreCardTable({ rows, updateStock, removeStock, stocks, sortBy, sortDi
   );
 }
 
-function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortBy, sortDir, sortToggle, yahooData }) {
+function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortBy, sortDir, sortToggle }) {
   return (
     <div className="rounded-lg border border-zinc-800 overflow-hidden bg-zinc-950">
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
@@ -557,33 +561,44 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
           <thead className="bg-zinc-900/50">
             <tr className="hairline">
               <SortHeader col="ticker" label="Ticker" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} align="left" />
-              <th className="px-2 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-zinc-500">Updated</th>
-              <SortHeader col="ttmEPS" label="TTM EPS" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
+              <SortHeader col="pe" label="P/E" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
+              <SortHeader col="ttmEPS" label="Trailing EPS" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
+              <SortHeader col="forwardEps" label="Forward EPS" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="growth" label="EPS Growth %" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="iv" label="Intrinsic Value" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="currentPrice" label="Current Price" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="pctIV" label="% of IV" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-              <th className="w-8"></th>
+              <th className="px-2 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-zinc-500">Updated Date</th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? <EmptyTableRow colSpan={8} message="No stocks tracked. Add a ticker to calculate intrinsic value." /> : rows.map((r) => {
+            {rows.length === 0 ? <EmptyTableRow colSpan={9} message="No stocks tracked. Add a ticker to calculate intrinsic value." /> : rows.map((r) => {
               const idx = stocks.findIndex((s) => s.ticker === r.ticker);
               return (
                 <tr key={r.ticker} className="hairline hover:bg-zinc-900/30 group">
-                  <td className="px-3 py-2"><TextCell value={r.ticker} onChange={(v) => updateStock(idx, { ticker: v })} width="w-16" uppercase /></td>
-                  <td className="px-2 py-2 text-zinc-500 font-mono text-xs"><TextCell value={r.updated} onChange={(v) => updateStock(idx, { updated: v })} width="w-16" /></td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <TextCell value={r.ticker} onChange={(v) => updateStock(idx, { ticker: v })} width="w-16" uppercase />
+                      <button onClick={() => removeStock(idx)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 transition">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums font-mono text-xs text-zinc-300">
+                    {r.pe != null ? r.pe.toFixed(1) : "—"}
+                  </td>
                   <td className="px-2 py-2 text-right"><NumCell value={r.ttmEPS} onChange={(v) => updateStock(idx, { ttmEPS: v })} decimals={2} width="w-20" /></td>
+                  <td className="px-2 py-2 text-right tabular-nums font-mono text-xs text-zinc-300">
+                    {r.forwardEps != null ? r.forwardEps.toFixed(2) : "—"}
+                  </td>
                   <td className="px-2 py-2 text-right"><NumCell value={r.growth} onChange={(v) => updateStock(idx, { growth: v })} decimals={0} suffix="%" width="w-16" /></td>
                   <td className="px-2 py-2 text-right tabular-nums font-mono text-xs text-zinc-300">{fmtMoney(r.iv)}</td>
                   <td className="px-2 py-2 text-right"><NumCell value={r.currentPrice} onChange={(v) => updateStock(idx, { currentPrice: v })} decimals={2} width="w-24" /></td>
                   <td className="px-2 py-2 text-right">
                     <span className={`inline-block px-2 py-0.5 rounded border tabular-nums font-mono text-xs ${ivBg(r.pctIV)} ${ivColor(r.pctIV)}`}>{r.pctIV.toFixed(2)}%</span>
                   </td>
-                  <td className="px-2 py-2 text-right">
-                    <button onClick={() => removeStock(idx)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 transition">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  <td className="px-2 py-2 text-zinc-500 font-mono text-xs">
+                    <TextCell value={r.updated} onChange={(v) => updateStock(idx, { updated: v })} width="w-16" />
                   </td>
                 </tr>
               );
@@ -591,51 +606,6 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
           </tbody>
         </table>
       </div>
-      {Object.values(yahooData).some(Boolean) && (
-        <div className="border-t border-zinc-800 px-4 py-4">
-          <div className="text-[11px] uppercase tracking-[0.15em] text-zinc-500 mb-2">
-            Yahoo Finance Reference Data (applied on refresh when available)
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs font-mono">
-              <thead>
-                <tr className="hairline">
-                  <th className="px-2 py-1 text-left text-[10px] uppercase tracking-wider text-zinc-600">Ticker</th>
-                  <th className="px-2 py-1 text-left text-[10px] uppercase tracking-wider text-zinc-600">Company</th>
-                  <th className="px-2 py-1 text-right text-[10px] uppercase tracking-wider text-zinc-600">Current Price</th>
-                  <th className="px-2 py-1 text-right text-[10px] uppercase tracking-wider text-zinc-600">Trailing EPS</th>
-                  <th className="px-2 py-1 text-right text-[10px] uppercase tracking-wider text-zinc-600">Forward EPS</th>
-                  <th className="px-2 py-1 text-right text-[10px] uppercase tracking-wider text-zinc-600">EPS Growth %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(yahooData)
-                  .filter(([, v]) => v != null)
-                  .map(([ticker, q]) => (
-                    <tr key={ticker} className="hairline hover:bg-zinc-900/20">
-                      <td className="px-2 py-1 font-medium text-zinc-300">{ticker}</td>
-                      <td className="px-2 py-1 text-zinc-500">{q.longName ?? "—"}</td>
-                      <td className="px-2 py-1 text-right text-zinc-300">
-                        {q.currentPrice != null ? fmtMoney(q.currentPrice) : "—"}
-                      </td>
-                      <td className="px-2 py-1 text-right text-zinc-300">
-                        {q.trailingEps != null ? q.trailingEps.toFixed(2) : "—"}
-                      </td>
-                      <td className="px-2 py-1 text-right text-zinc-300">
-                        {q.forwardEps != null ? q.forwardEps.toFixed(2) : "—"}
-                      </td>
-                      <td className="px-2 py-1 text-right text-zinc-300">
-                        {q.epsGrowthRate != null
-                          ? (q.epsGrowthRate * 100).toFixed(1) + "%"
-                          : "—"}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

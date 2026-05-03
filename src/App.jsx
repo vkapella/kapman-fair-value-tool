@@ -267,10 +267,13 @@ export default function App() {
 
       const today = todayShort();
       const updates = stocks.filter(
-        (s) => quoteMap[s.ticker]?.previousClose != null
+        (s) => (quoteMap[s.ticker]?.currentPrice ?? quoteMap[s.ticker]?.previousClose) != null
       ).map((s) => ({
         stock: s,
-        patch: { currentPrice: quoteMap[s.ticker].previousClose, updated: today },
+        patch: {
+          currentPrice: quoteMap[s.ticker].currentPrice ?? quoteMap[s.ticker].previousClose,
+          updated: today,
+        },
       }));
 
       const savedStocks = await Promise.all(
@@ -286,7 +289,7 @@ export default function App() {
       );
       setStocks((prev) => prev.map((s) => savedByTicker.get(s.ticker) || s));
       setRefreshMsg(
-        `Updated ${savedStocks.length}/${stocks.length} prices from Yahoo Finance`
+        `Updated ${savedStocks.length}/${stocks.length} current quotes from Yahoo Finance`
       );
     } catch (e) {
       setRefreshMsg(`Refresh failed: ${e.message}`);
@@ -613,6 +616,7 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
                 <tr className="hairline">
                   <th className="px-2 py-1 text-left text-[10px] uppercase tracking-wider text-zinc-600">Ticker</th>
                   <th className="px-2 py-1 text-left text-[10px] uppercase tracking-wider text-zinc-600">Company</th>
+                  <th className="px-2 py-1 text-right text-[10px] uppercase tracking-wider text-zinc-600">Current Price</th>
                   <th className="px-2 py-1 text-right text-[10px] uppercase tracking-wider text-zinc-600">Trailing EPS</th>
                   <th className="px-2 py-1 text-right text-[10px] uppercase tracking-wider text-zinc-600">Forward EPS</th>
                   <th className="px-2 py-1 text-right text-[10px] uppercase tracking-wider text-zinc-600">EPS Growth %</th>
@@ -625,6 +629,9 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
                     <tr key={ticker} className="hairline hover:bg-zinc-900/20">
                       <td className="px-2 py-1 font-medium text-zinc-300">{ticker}</td>
                       <td className="px-2 py-1 text-zinc-500">{q.longName ?? "—"}</td>
+                      <td className="px-2 py-1 text-right text-zinc-300">
+                        {q.currentPrice != null ? fmtMoney(q.currentPrice) : "—"}
+                      </td>
                       <td className="px-2 py-1 text-right text-zinc-300">
                         {q.trailingEps != null ? q.trailingEps.toFixed(2) : "—"}
                       </td>

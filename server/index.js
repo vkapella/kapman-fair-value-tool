@@ -2,13 +2,14 @@ import Database from "better-sqlite3";
 import express from "express";
 import fs from "fs";
 import path from "path";
-import yahooFinance from "yahoo-finance2";
+import YahooFinance from "yahoo-finance2";
 import { fileURLToPath } from "url";
 import { DEFAULT_GLOBALS, SEED_STOCKS } from "../src/lib/defaultData.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 8080;
+const yahooFinance = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 const defaultDbDir = process.env.NODE_ENV === "production" ? "/data" : path.join(__dirname, "..", ".data");
 const DB_PATH = process.env.SQLITE_DB_PATH || path.join(defaultDbDir, "fair-value.sqlite");
 
@@ -287,6 +288,7 @@ app.post("/api/quotes", async (req, res) => {
         try {
           const quote = await yahooFinance.quote(t, {}, { validateResult: false });
           result[t] = {
+            currentPrice: quote.regularMarketPrice ?? null,
             previousClose: quote.regularMarketPreviousClose ?? null,
             trailingEps: quote.trailingEps ?? null,
             forwardEps: quote.forwardEps ?? null,

@@ -230,6 +230,10 @@ function handleRoute(fn) {
   };
 }
 
+function yahooSymbolFromTicker(ticker) {
+  return ticker.replace(/\./g, "-");
+}
+
 app.get("/api/data", handleRoute((req, res) => {
   res.json({ stocks: getStocks(), globals: getGlobals() });
 }));
@@ -285,15 +289,29 @@ app.post("/api/quotes", async (req, res) => {
     await Promise.all(
       tickers.map(async (raw) => {
         const t = String(raw).trim().toUpperCase();
+        const yahooSymbol = yahooSymbolFromTicker(t);
         try {
-          const quote = await yahooFinance.quote(t, {}, { validateResult: false });
+          const [quote, summary] = await Promise.all([
+            yahooFinance.quote(yahooSymbol, {}, { validateResult: false }).catch(() => null),
+            yahooFinance.quoteSummary(
+              yahooSymbol,
+              { modules: ["defaultKeyStatistics", "financialData", "price"] },
+              { validateResult: false }
+            ).catch(() => null),
+          ]);
+
+          if (!quote && !summary) {
+            result[t] = null;
+            return;
+          }
+
           result[t] = {
-            currentPrice: quote.regularMarketPrice ?? null,
-            previousClose: quote.regularMarketPreviousClose ?? null,
-            trailingEps: quote.trailingEps ?? null,
-            forwardEps: quote.forwardEps ?? null,
-            epsGrowthRate: quote.earningsGrowth ?? null,
-            longName: quote.longName ?? null,
+            currentPrice: quote?.regularMarketPrice ?? summary?.price?.regularMarketPrice ?? null,
+            previousClose: quote?.regularMarketPreviousClose ?? summary?.price?.regularMarketPreviousClose ?? null,
+            trailingEps: summary?.defaultKeyStatistics?.trailingEps ?? quote?.trailingEps ?? null,
+            forwardEps: summary?.defaultKeyStatistics?.forwardEps ?? quote?.forwardEps ?? null,
+            epsGrowthRate: summary?.financialData?.earningsGrowth ?? quote?.earningsGrowth ?? null,
+            longName: quote?.longName ?? summary?.price?.longName ?? summary?.price?.shortName ?? null,
           };
         } catch (_) {
           result[t] = null;

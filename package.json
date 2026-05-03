@@ -16,9 +16,11 @@
     "express": "^4.21.2",
     "lucide-react": "^0.460.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "yahoo-finance2": "^3.14.0"
   },
   "devDependencies": {
+    "@flydotio/dockerfile": "^0.7.10",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.0",

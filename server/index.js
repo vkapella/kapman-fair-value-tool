@@ -234,6 +234,37 @@ function yahooSymbolFromTicker(ticker) {
   return ticker.replace(/\./g, "-");
 }
 
+function emptyFundamentals() {
+  return {
+    trailingPE: null,
+    forwardPE: null,
+    priceToBook: null,
+    debtToEquity: null,
+    currentRatio: null,
+    revenueGrowth: null,
+    freeCashflow: null,
+    totalCash: null,
+    totalDebt: null,
+    returnOnEquity: null,
+    returnOnAssets: null,
+    grossMargins: null,
+    operatingMargins: null,
+    profitMargins: null,
+    revenuePerShare: null,
+    beta: null,
+    sector: null,
+    industry: null,
+    marketCap: null,
+    fiftyTwoWeekHigh: null,
+    fiftyTwoWeekLow: null,
+    dividendYield: null,
+    shortPercentOfFloat: null,
+    sharesOutstanding: null,
+    insidersPercentHeld: null,
+    institutionsPercentHeld: null,
+  };
+}
+
 app.get("/api/data", handleRoute((req, res) => {
   res.json({ stocks: getStocks(), globals: getGlobals() });
 }));
@@ -277,6 +308,40 @@ app.put("/api/globals", handleRoute((req, res) => {
   res.json(getGlobals());
 }));
 
+app.post("/api/prices", async (req, res) => {
+  const { tickers } = req.body || {};
+  if (!Array.isArray(tickers) || tickers.length === 0) {
+    return res.status(400).json({ error: "tickers must be a non-empty array" });
+  }
+
+  try {
+    const result = {};
+    await Promise.all(
+      tickers.map(async (raw) => {
+        const ticker = String(raw || "").trim().toUpperCase();
+        if (!ticker) return;
+        try {
+          const quote = await yahooFinance.quote(yahooSymbolFromTicker(ticker), {}, { validateResult: false }).catch(() => null);
+          result[ticker] = {
+            currentPrice: quote?.regularMarketPrice ?? null,
+            previousClose: quote?.regularMarketPreviousClose ?? null,
+            longName: quote?.longName ?? quote?.shortName ?? null,
+          };
+        } catch (_) {
+          result[ticker] = {
+            currentPrice: null,
+            previousClose: null,
+            longName: null,
+          };
+        }
+      })
+    );
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error?.message || "internal server error" });
+  }
+});
+
 // API: fetch enriched quote data from Yahoo Finance (no API key required)
 app.post("/api/quotes", async (req, res) => {
   const { tickers } = req.body || {};
@@ -295,15 +360,10 @@ app.post("/api/quotes", async (req, res) => {
             yahooFinance.quote(yahooSymbol, {}, { validateResult: false }).catch(() => null),
             yahooFinance.quoteSummary(
               yahooSymbol,
-              { modules: ["defaultKeyStatistics", "financialData", "price"] },
+              { modules: ["defaultKeyStatistics", "financialData", "price", "summaryDetail", "assetProfile", "majorHoldersBreakdown"] },
               { validateResult: false }
             ).catch(() => null),
           ]);
-
-          if (!quote && !summary) {
-            result[t] = null;
-            return;
-          }
 
           result[t] = {
             currentPrice: quote?.regularMarketPrice ?? summary?.price?.regularMarketPrice ?? null,
@@ -312,6 +372,35 @@ app.post("/api/quotes", async (req, res) => {
             forwardEps: summary?.defaultKeyStatistics?.forwardEps ?? quote?.forwardEps ?? null,
             epsGrowthRate: summary?.financialData?.earningsGrowth ?? quote?.earningsGrowth ?? null,
             longName: quote?.longName ?? summary?.price?.longName ?? summary?.price?.shortName ?? null,
+            fundamentals: {
+              ...emptyFundamentals(),
+              trailingPE: summary?.summaryDetail?.trailingPE ?? null,
+              forwardPE: summary?.summaryDetail?.forwardPE ?? null,
+              priceToBook: summary?.defaultKeyStatistics?.priceToBook ?? null,
+              debtToEquity: summary?.financialData?.debtToEquity ?? null,
+              currentRatio: summary?.summaryDetail?.currentRatio ?? null,
+              revenueGrowth: summary?.financialData?.revenueGrowth ?? null,
+              freeCashflow: summary?.financialData?.freeCashflow ?? null,
+              totalCash: summary?.financialData?.totalCash ?? null,
+              totalDebt: summary?.financialData?.totalDebt ?? null,
+              returnOnEquity: summary?.financialData?.returnOnEquity ?? null,
+              returnOnAssets: summary?.financialData?.returnOnAssets ?? null,
+              grossMargins: summary?.financialData?.grossMargins ?? null,
+              operatingMargins: summary?.financialData?.operatingMargins ?? null,
+              profitMargins: summary?.financialData?.profitMargins ?? null,
+              revenuePerShare: summary?.financialData?.revenuePerShare ?? null,
+              beta: summary?.summaryDetail?.beta ?? null,
+              sector: summary?.assetProfile?.sector ?? null,
+              industry: summary?.assetProfile?.industry ?? null,
+              marketCap: summary?.summaryDetail?.marketCap ?? null,
+              fiftyTwoWeekHigh: summary?.summaryDetail?.fiftyTwoWeekHigh ?? null,
+              fiftyTwoWeekLow: summary?.summaryDetail?.fiftyTwoWeekLow ?? null,
+              dividendYield: summary?.summaryDetail?.dividendYield ?? null,
+              shortPercentOfFloat: summary?.defaultKeyStatistics?.shortPercentOfFloat ?? null,
+              sharesOutstanding: summary?.defaultKeyStatistics?.sharesOutstanding ?? null,
+              insidersPercentHeld: summary?.majorHoldersBreakdown?.insidersPercentHeld ?? null,
+              institutionsPercentHeld: summary?.majorHoldersBreakdown?.institutionsPercentHeld ?? null,
+            },
           };
         } catch (_) {
           result[t] = null;

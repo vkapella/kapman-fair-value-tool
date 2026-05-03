@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { TrendingUp, Plus, Trash2, RefreshCw, Calculator, Target, Settings } from "lucide-react";
 import { DEFAULT_GLOBALS, SEED_STOCKS } from "./lib/defaultData.js";
+import { RUBRIC_DEF, suggestScore } from "./lib/rubric.js";
 
 const calcIV = (eps, growth, g) => eps * (g.peNoGrowth + g.g * growth) * (g.avgYieldAAA / g.bondYield);
 const calcPctIV = (price, iv) => (iv > 0 ? (price / iv) * 100 : 0);
@@ -117,6 +118,8 @@ export default function App() {
   const [refreshMsg, setRefreshMsg] = useState("");
   const [yahooData, setYahooData] = useState({});
   const [showSettings, setShowSettings] = useState(false);
+  const [worksheet, setWorksheet] = useState(null);
+  const [worksheetLoading, setWorksheetLoading] = useState(null);
   const statusTimer = useRef(null);
 
   const markSaved = () => {
@@ -313,6 +316,49 @@ export default function App() {
     avgScore: rows.length ? rows.reduce((a, r) => a + r.score, 0) / rows.length : 0,
   }), [rows]);
 
+
+  const handleOpenWorksheet = async (ticker, category) => {
+    const row = rows.find((r) => r.ticker === ticker);
+    const existing = yahooData[ticker]?.fundamentals;
+
+    if (existing) {
+      setWorksheet({
+        ticker,
+        category,
+        fundamentals: existing,
+        epsGrowthRate: yahooData[ticker]?.epsGrowthRate ?? null,
+        pctIV: row?.pctIV ?? null,
+        currentScore: row?.[category] ?? 0,
+      });
+      return;
+    }
+
+    const iconKey = `${ticker}-${category}`;
+    setWorksheetLoading(iconKey);
+    try {
+      const res = await fetch('/api/quotes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tickers: [ticker] }),
+      });
+      const data = await res.json();
+      const quote = data[ticker];
+      setYahooData((prev) => ({ ...prev, [ticker]: { ...(prev[ticker] || {}), ...quote } }));
+      setWorksheet({
+        ticker,
+        category,
+        fundamentals: quote?.fundamentals ?? {},
+        epsGrowthRate: quote?.epsGrowthRate ?? null,
+        pctIV: row?.pctIV ?? null,
+        currentScore: row?.[category] ?? 0,
+      });
+    } catch (e) {
+      setRefreshMsg(`Failed to fetch data for ${ticker}: ${e.message}`);
+    } finally {
+      setWorksheetLoading(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <div className="grid-bg min-h-screen">
@@ -419,7 +465,7 @@ export default function App() {
           )}
           {!dataLoading && !dataError && (
             <>
-              {tab === "scorecard" && <ScoreCardTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
+              {tab === "scorecard" && <ScoreCardTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} onOpenWorksheet={handleOpenWorksheet} worksheetLoading={worksheetLoading} />}
               {tab === "intrinsic" && (
                 <IntrinsicTable
                   rows={sorted}
@@ -436,11 +482,132 @@ export default function App() {
             </>
           )}
 
+          {worksheet && (
+            <RubricWorksheet
+              worksheet={worksheet}
+              onClose={() => setWorksheet(null)}
+              onApply={(ticker, category, score) => {
+                const idx = stocks.findIndex((stock) => stock.ticker === ticker);
+                if (idx !== -1) updateStock(idx, { [category]: score });
+                setWorksheet(null);
+              }}
+              globals={{ ...globals, epsGrowthRate: worksheet.epsGrowthRate }}
+            />
+          )}
+
           <div className="mt-8 text-[10px] text-zinc-600 font-mono leading-relaxed">
             <p>Scoring rubric (max 100): Valuation 20 · Growth 20 · Moat 20 · Execution Risk 10 · Economy 30. Score ≥75 = potential buy.</p>
             <p className="mt-1">Allocation signals are algorithmic defaults. Override per your conviction. Not financial advice.</p>
           </div>
         </main>
+      </div>
+    </div>
+  );
+}
+
+
+function formatFieldValue(value, format) {
+  if (value == null || value === "") return "—";
+  if (format === "percent" && typeof value === "number") return `${(value * 100).toFixed(2)}%`;
+  if (format === "currency" && typeof value === "number") return `$${value.toLocaleString()}`;
+  if ((format === "ratio" || format === "number") && typeof value === "number") return value.toFixed(2);
+  return String(value);
+}
+
+function RubricWorksheet({ worksheet, onClose, onApply, globals }) {
+  const def = RUBRIC_DEF[worksheet.category];
+  const [overrides, setOverrides] = useState({});
+  const [qualitative, setQualitative] = useState({});
+
+  useEffect(() => {
+    const next = {};
+    for (const field of def.qualitativeFields) {
+      const optionsLength = field.options?.length || 1;
+      next[field.key] = Math.floor((optionsLength - 1) / 2);
+    }
+    setQualitative(next);
+    setOverrides({});
+  }, [worksheet.ticker, worksheet.category]);
+
+  const { suggested, breakdown } = suggestScore(
+    worksheet.category,
+    { ...(worksheet.fundamentals || {}), epsGrowthRate: worksheet.epsGrowthRate },
+    worksheet.pctIV,
+    globals,
+    { ...overrides, ...qualitative }
+  );
+
+  const breakdownByKey = new Map(breakdown.map((entry) => [entry.key, entry]));
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ minHeight: 400, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem 1rem" }}
+    >
+      <div onClick={(e) => e.stopPropagation()} className="bg-zinc-950 border border-zinc-800 rounded-lg w-full max-w-2xl">
+        <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
+          <div className="text-sm font-mono">{worksheet.ticker} · {def.label}</div>
+          <div className="flex items-center gap-4">
+            <div className="text-xs text-zinc-400">current: {worksheet.currentScore}</div>
+            <button onClick={onClose} className="text-zinc-400 hover:text-zinc-100">✕</button>
+          </div>
+        </div>
+
+        <div className="px-4 pt-4 text-[10px] uppercase tracking-[0.2em] text-zinc-500">Quantitative Inputs</div>
+        <div className="px-4 pb-4 space-y-2 mt-2">
+          {def.quantitativeFields.map((field) => {
+            const entry = breakdownByKey.get(field.key);
+            const bandTone = entry?.contribution >= (def.max * 0.16) ? "text-emerald-300" : entry?.contribution >= (def.max * 0.09) ? "text-amber-300" : "text-rose-300";
+            return (
+              <div key={field.key} className="grid grid-cols-4 gap-2 items-center text-xs">
+                <div>
+                  <div className="text-zinc-200">{field.label}</div>
+                  <div className="text-zinc-500 text-[10px]">{field.description}</div>
+                </div>
+                <div className="text-zinc-300 font-mono text-xs">{formatFieldValue(worksheet.fundamentals?.[field.key] ?? (field.key === "epsGrowthRate" ? worksheet.epsGrowthRate : null), field.format)}</div>
+                <input
+                  value={overrides[field.key] ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setOverrides((prev) => ({ ...prev, [field.key]: raw === "" ? null : (field.format === "text" ? raw : Number(raw)) }));
+                  }}
+                  className="w-full bg-zinc-900 border border-zinc-700 px-1.5 py-1 text-right tabular-nums text-zinc-100 font-mono text-xs rounded outline-none"
+                />
+                <div className={`${bandTone} text-xs`}>{entry?.bandLabel || "—"}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="px-4 pt-2 text-[10px] uppercase tracking-[0.2em] text-zinc-500">Your Judgment</div>
+        <div className="px-4 pb-4 space-y-2 mt-2">
+          {def.qualitativeFields.map((field) => (
+            <div key={field.key} className="grid grid-cols-2 gap-2 items-center text-xs">
+              <div>
+                <div className="text-zinc-200">{field.label}</div>
+                <div className="text-zinc-500 text-[10px]">{field.description}</div>
+              </div>
+              <select
+                value={qualitative[field.key] ?? 0}
+                onChange={(e) => setQualitative((prev) => ({ ...prev, [field.key]: Number(e.target.value) }))}
+                className="w-full bg-zinc-900 border border-zinc-700 px-2 py-1 text-zinc-100 text-xs rounded outline-none"
+              >
+                {(field.options || []).map((opt, idx) => <option key={opt} value={idx}>{opt}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+
+        <div className="px-4 pb-4">
+          <div className="text-xs text-zinc-300 mb-1">Suggested score</div>
+          <div className="h-2 bg-zinc-800 rounded overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${(suggested / def.max) * 100}%` }} /></div>
+          <div className="text-xs font-mono mt-1">{suggested} / {def.max}</div>
+        </div>
+
+        <div className="px-4 py-3 border-t border-zinc-800 flex items-center justify-end gap-2">
+          <button onClick={() => onApply(worksheet.ticker, worksheet.category, suggested)} className="px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-400 text-emerald-950 text-xs font-medium">Apply {suggested}</button>
+          <button onClick={onClose} className="px-3 py-2 rounded border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900 text-xs">Cancel</button>
+        </div>
       </div>
     </div>
   );
@@ -491,7 +658,7 @@ function EmptyTableRow({ colSpan, message }) {
   );
 }
 
-function ScoreCardTable({ rows, updateStock, removeStock, stocks, sortBy, sortDir, sortToggle }) {
+function ScoreCardTable({ rows, updateStock, removeStock, stocks, sortBy, sortDir, sortToggle, onOpenWorksheet, worksheetLoading }) {
   return (
     <div className="rounded-lg border border-zinc-800 overflow-hidden bg-zinc-950">
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
@@ -523,11 +690,11 @@ function ScoreCardTable({ rows, updateStock, removeStock, stocks, sortBy, sortDi
                 <tr key={r.ticker} className="hairline hover:bg-zinc-900/30 group">
                   <td className="px-3 py-2"><TextCell value={r.ticker} onChange={(v) => updateStock(idx, { ticker: v })} width="w-16" uppercase /></td>
                   <td className="px-2 py-2 text-right"><span className={`tabular-nums font-mono text-xs ${ivColor(r.pctIV)}`}>{r.pctIV.toFixed(2)}%</span></td>
-                  <td className="px-2 py-2 text-right"><NumCell value={r.valuation} onChange={(v) => updateStock(idx, { valuation: v })} decimals={0} max={20} width="w-14" /></td>
-                  <td className="px-2 py-2 text-right"><NumCell value={r.growthScore} onChange={(v) => updateStock(idx, { growthScore: v })} decimals={0} max={20} width="w-14" /></td>
-                  <td className="px-2 py-2 text-right"><NumCell value={r.moat} onChange={(v) => updateStock(idx, { moat: v })} decimals={0} max={20} width="w-14" /></td>
-                  <td className="px-2 py-2 text-right"><NumCell value={r.executionRisk} onChange={(v) => updateStock(idx, { executionRisk: v })} decimals={0} max={10} width="w-14" /></td>
-                  <td className="px-2 py-2 text-right"><NumCell value={r.economy} onChange={(v) => updateStock(idx, { economy: v })} decimals={0} max={30} width="w-14" /></td>
+                  <td className="px-2 py-2 text-right"><div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}><NumCell value={r.valuation} onChange={(v) => updateStock(idx, { valuation: v })} decimals={0} max={20} width="w-14" /><button onClick={(e) => { e.stopPropagation(); onOpenWorksheet(r.ticker, "valuation"); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-emerald-400 transition text-[10px] leading-none" title="Open scoring worksheet"><span className={worksheetLoading === `${r.ticker}-valuation` ? "animate-spin inline-block" : ""}>{worksheetLoading === `${r.ticker}-valuation` ? "↻" : "ⓘ"}</span></button></div></td>
+                  <td className="px-2 py-2 text-right"><div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}><NumCell value={r.growthScore} onChange={(v) => updateStock(idx, { growthScore: v })} decimals={0} max={20} width="w-14" /><button onClick={(e) => { e.stopPropagation(); onOpenWorksheet(r.ticker, "growthScore"); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-emerald-400 transition text-[10px] leading-none" title="Open scoring worksheet"><span className={worksheetLoading === `${r.ticker}-growthScore` ? "animate-spin inline-block" : ""}>{worksheetLoading === `${r.ticker}-growthScore` ? "↻" : "ⓘ"}</span></button></div></td>
+                  <td className="px-2 py-2 text-right"><div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}><NumCell value={r.moat} onChange={(v) => updateStock(idx, { moat: v })} decimals={0} max={20} width="w-14" /><button onClick={(e) => { e.stopPropagation(); onOpenWorksheet(r.ticker, "moat"); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-emerald-400 transition text-[10px] leading-none" title="Open scoring worksheet"><span className={worksheetLoading === `${r.ticker}-moat` ? "animate-spin inline-block" : ""}>{worksheetLoading === `${r.ticker}-moat` ? "↻" : "ⓘ"}</span></button></div></td>
+                  <td className="px-2 py-2 text-right"><div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}><NumCell value={r.executionRisk} onChange={(v) => updateStock(idx, { executionRisk: v })} decimals={0} max={10} width="w-14" /><button onClick={(e) => { e.stopPropagation(); onOpenWorksheet(r.ticker, "executionRisk"); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-emerald-400 transition text-[10px] leading-none" title="Open scoring worksheet"><span className={worksheetLoading === `${r.ticker}-executionRisk` ? "animate-spin inline-block" : ""}>{worksheetLoading === `${r.ticker}-executionRisk` ? "↻" : "ⓘ"}</span></button></div></td>
+                  <td className="px-2 py-2 text-right"><div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}><NumCell value={r.economy} onChange={(v) => updateStock(idx, { economy: v })} decimals={0} max={30} width="w-14" /><button onClick={(e) => { e.stopPropagation(); onOpenWorksheet(r.ticker, "economy"); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-emerald-400 transition text-[10px] leading-none" title="Open scoring worksheet"><span className={worksheetLoading === `${r.ticker}-economy` ? "animate-spin inline-block" : ""}>{worksheetLoading === `${r.ticker}-economy` ? "↻" : "ⓘ"}</span></button></div></td>
                   <td className="px-2 py-2 text-right">
                     <span className={`inline-flex items-center justify-center w-12 py-1 rounded font-mono font-bold text-xs ${scoreColor(r.score)}`}>{r.score}</span>
                   </td>

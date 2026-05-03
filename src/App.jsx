@@ -564,11 +564,10 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
               <SortHeader col="currentPrice" label="Current Price" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="pctIV" label="% of IV" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <th className="w-8"></th>
-              <th className="w-8"></th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? <EmptyTableRow colSpan={9} message="No stocks tracked. Add a ticker to calculate intrinsic value." /> : rows.map((r) => {
+            {rows.length === 0 ? <EmptyTableRow colSpan={8} message="No stocks tracked. Add a ticker to calculate intrinsic value." /> : rows.map((r) => {
               const idx = stocks.findIndex((s) => s.ticker === r.ticker);
               return (
                 <tr key={r.ticker} className="hairline hover:bg-zinc-900/30 group">
@@ -580,22 +579,6 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
                   <td className="px-2 py-2 text-right"><NumCell value={r.currentPrice} onChange={(v) => updateStock(idx, { currentPrice: v })} decimals={2} width="w-24" /></td>
                   <td className="px-2 py-2 text-right">
                     <span className={`inline-block px-2 py-0.5 rounded border tabular-nums font-mono text-xs ${ivBg(r.pctIV)} ${ivColor(r.pctIV)}`}>{r.pctIV.toFixed(2)}%</span>
-                  </td>
-                  <td className="px-2 py-2 text-right">
-                    {yahooData[r.ticker]?.trailingEps != null && (
-                      <button
-                        onClick={() => {
-                          if (window.confirm(
-                            `Apply Yahoo trailing EPS of ${yahooData[r.ticker].trailingEps} to ${r.ticker}?`
-                          )) {
-                            updateStock(idx, { ttmEPS: yahooData[r.ticker].trailingEps });
-                          }
-                        }}
-                        className="text-[10px] font-mono px-2 py-1 rounded border border-emerald-700 text-emerald-400 hover:bg-emerald-900/30 transition"
-                      >
-                        Apply EPS
-                      </button>
-                    )}
                   </td>
                   <td className="px-2 py-2 text-right">
                     <button onClick={() => removeStock(idx)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 transition">

@@ -266,15 +266,18 @@ export default function App() {
       setYahooData(quoteMap);
 
       const today = todayShort();
-      const updates = stocks.filter(
-        (s) => (quoteMap[s.ticker]?.currentPrice ?? quoteMap[s.ticker]?.previousClose) != null
-      ).map((s) => ({
-        stock: s,
-        patch: {
-          currentPrice: quoteMap[s.ticker].currentPrice ?? quoteMap[s.ticker].previousClose,
-          updated: today,
-        },
-      }));
+      const updates = stocks.map((stock) => {
+        const quote = quoteMap[stock.ticker];
+        if (!quote) return null;
+
+        const patch = { updated: today };
+        const price = quote.currentPrice ?? quote.previousClose;
+        if (price != null) patch.currentPrice = price;
+        if (quote.trailingEps != null) patch.ttmEPS = quote.trailingEps;
+        if (quote.epsGrowthRate != null) patch.growth = quote.epsGrowthRate * 100;
+
+        return Object.keys(patch).length > 1 ? { stock, patch } : null;
+      }).filter(Boolean);
 
       const savedStocks = await Promise.all(
         updates.map(({ stock, patch }) =>
@@ -289,7 +292,7 @@ export default function App() {
       );
       setStocks((prev) => prev.map((s) => savedByTicker.get(s.ticker) || s));
       setRefreshMsg(
-        `Updated ${savedStocks.length}/${stocks.length} current quotes from Yahoo Finance`
+        `Updated ${savedStocks.length}/${stocks.length} rows from Yahoo Finance`
       );
     } catch (e) {
       setRefreshMsg(`Refresh failed: ${e.message}`);
@@ -608,7 +611,7 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
       {Object.values(yahooData).some(Boolean) && (
         <div className="border-t border-zinc-800 px-4 py-4">
           <div className="text-[11px] uppercase tracking-[0.15em] text-zinc-500 mb-2">
-            Yahoo Finance Reference Data (read-only · not applied automatically)
+            Yahoo Finance Reference Data (applied on refresh when available)
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs font-mono">

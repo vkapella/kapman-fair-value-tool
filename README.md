@@ -1,0 +1,135 @@
+# Fair Value Evaluator
+
+Modified-Graham intrinsic value tool with manual scorecard and Polygon-backed live price refresh. Deploys to Fly.io as a single Node container.
+
+```
+IV = EPS × (P/E_no_growth + g × Growth%) × (Avg_AAA_Yield / Bond_Yield)
+```
+
+## Stack
+- React + Vite (frontend, Tailwind for styling)
+- Express (serves built SPA + `/api/prices` Polygon proxy)
+- Fly.io (single shared-CPU 256MB machine)
+
+## Local development
+
+```bash
+npm install
+export POLYGON_API_KEY=your_key_here    # only needed for Refresh Prices
+npm run dev
+```
+
+This runs Vite (port 5173) and Express (port 8080) concurrently. The Vite dev server proxies `/api/*` to Express.
+
+Visit http://localhost:5173
+
+## Push to GitHub
+
+```bash
+git init
+git add .
+git commit -m "Initial commit"
+git branch -M main
+
+# Create the empty repo first on github.com (no README/license)
+git remote add origin git@github.com:YOUR_USERNAME/fair-value-evaluator.git
+git push -u origin main
+```
+
+## Deploy to Fly.io
+
+One-time setup:
+
+```bash
+# Install flyctl: https://fly.io/docs/flyctl/install/
+brew install flyctl                     # macOS
+# or: curl -L https://fly.io/install.sh | sh
+
+fly auth signup                         # or: fly auth login
+```
+
+Launch the app (first deploy):
+
+```bash
+fly launch --no-deploy --copy-config --name fair-value-evaluator
+fly secrets set POLYGON_API_KEY=your_polygon_key_here
+fly deploy
+```
+
+`fly launch` will detect the existing `fly.toml` and `Dockerfile` and skip generating new ones. The `--copy-config` flag tells it to reuse them.
+
+Subsequent deploys (after editing code):
+
+```bash
+git push                                # push to GitHub
+fly deploy                              # deploy to Fly
+```
+
+Open the live app:
+
+```bash
+fly open
+```
+
+## Editing workflow
+
+1. Clone the repo on any machine: `git clone git@github.com:YOUR_USERNAME/fair-value-evaluator.git`
+2. Edit `src/App.jsx` (the main component) or `server/index.js` (the API)
+3. Test locally: `npm run dev`
+4. Push: `git push`
+5. Deploy: `fly deploy`
+
+If you want auto-deploy on every `git push`, add a GitHub Action — Fly publishes a starter at https://fly.io/docs/launch/continuous-deployment-with-github-actions/
+
+## Project structure
+
+```
+fair-value-evaluator/
+├── src/
+│   ├── App.jsx          # Main React component
+│   ├── main.jsx         # React entry
+│   └── index.css        # Tailwind + global styles
+├── server/
+│   └── index.js         # Express server + Polygon proxy
+├── index.html           # Vite HTML template
+├── package.json
+├── vite.config.js       # Vite + dev API proxy
+├── tailwind.config.js
+├── postcss.config.js
+├── Dockerfile           # Multi-stage build
+├── fly.toml             # Fly.io config
+└── .gitignore
+```
+
+## Data persistence
+
+User edits (tickers, scores, growth rates, formula globals) are saved to **localStorage** in the browser. This means:
+
+- Edits persist across page refreshes ✓
+- Edits are per-browser, per-device — no cloud sync
+- Clearing browser data resets to seed values
+
+If you want cross-device sync later, swap the `localStorage` calls in `src/App.jsx` for a small REST endpoint backed by SQLite or Fly's volume mounts.
+
+## Polygon API
+
+The server uses Polygon's `/v2/aggs/ticker/{ticker}/prev` endpoint (previous-close). Free tier works but is rate-limited to 5 req/min — fine for ~16 tickers if you wait between refreshes. For higher volume, upgrade your Polygon plan.
+
+Get a key: https://polygon.io/dashboard
+
+## Cost on Fly.io
+
+A single shared-cpu-1x@256MB machine with `auto_stop_machines = "stop"` costs roughly **$0–$2/mo** for personal use — the machine sleeps when idle and cold-starts on first request (~2s).
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `Refresh failed: HTTP 500` | `POLYGON_API_KEY` not set. Run `fly secrets set POLYGON_API_KEY=...` |
+| `Refresh failed: HTTP 429` | Polygon free-tier rate limit. Wait 60s. |
+| App won't load after deploy | `fly logs` to see startup errors |
+| Build fails on Fly | Check `fly logs` during `fly deploy`; usually a Node version mismatch |
+
+## Disclaimer
+
+Not financial advice. Intrinsic value calculations are heuristics — they don't account for debt, capital structure, sector dynamics, or macro conditions. Use as a screening tool, not a buy/sell signal.

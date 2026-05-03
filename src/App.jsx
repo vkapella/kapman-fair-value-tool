@@ -115,6 +115,7 @@ export default function App() {
   const [storageStatus, setStorageStatus] = useState("loading");
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState("");
+  const [yahooData, setYahooData] = useState({});
   const [showSettings, setShowSettings] = useState(false);
   const statusTimer = useRef(null);
 
@@ -248,10 +249,11 @@ export default function App() {
   };
 
   const refreshPrices = async () => {
-    setRefreshing(true); setRefreshMsg("Fetching live prices from Polygon…");
+    setRefreshing(true);
+    setRefreshMsg("Fetching live quotes from Yahoo Finance…");
     try {
       const tickers = stocks.map((s) => s.ticker);
-      const res = await fetch("/api/prices", {
+      const res = await fetch("/api/quotes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tickers }),
@@ -260,24 +262,32 @@ export default function App() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
-      const priceMap = await res.json();
-      const today = todayShort();
-      const updates = stocks
-        .map((stock) => {
-          const price = priceMap[stock.ticker] ?? priceMap[stock.ticker.replace(".", "")];
-          return price ? { stock, patch: { currentPrice: parseFloat(price), updated: today } } : null;
-        })
-        .filter(Boolean);
+      const quoteMap = await res.json();
+      setYahooData(quoteMap);
 
-      const savedStocks = await Promise.all(updates.map(({ stock, patch }) => (
-        apiRequest(`/api/stocks/${encodeURIComponent(stock.ticker)}`, {
+      const today = todayShort();
+      const updates = stocks.filter(
+        (s) => quoteMap[s.ticker]?.previousClose != null
+      ).map((s) => ({
+        stock: s,
+        patch: { currentPrice: quoteMap[s.ticker].previousClose, updated: today },
+      }));
+
+      const savedStocks = await Promise.all(
+        updates.map(({ stock, patch }) =>
+          apiRequest(`/api/stocks/${encodeURIComponent(stock.ticker)}`, {
           method: "PUT",
           body: JSON.stringify(patch),
         }).then((saved) => ({ oldTicker: stock.ticker, saved }))
-      )));
-      const savedByTicker = new Map(savedStocks.map(({ oldTicker, saved }) => [oldTicker, saved]));
-      setStocks((prev) => prev.map((stock) => savedByTicker.get(stock.ticker) || stock));
-      setRefreshMsg(`Updated ${savedStocks.length}/${stocks.length} prices`);
+      )
+      );
+      const savedByTicker = new Map(
+        savedStocks.map(({ oldTicker, saved }) => [oldTicker, saved])
+      );
+      setStocks((prev) => prev.map((s) => savedByTicker.get(s.ticker) || s));
+      setRefreshMsg(
+        `Updated ${savedStocks.length}/${stocks.length} prices from Yahoo Finance`
+      );
     } catch (e) {
       setRefreshMsg(`Refresh failed: ${e.message}`);
     } finally {
@@ -399,7 +409,19 @@ export default function App() {
           {!dataLoading && !dataError && (
             <>
               {tab === "scorecard" && <ScoreCardTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
-              {tab === "intrinsic" && <IntrinsicTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} globals={globals} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
+              {tab === "intrinsic" && (
+                <IntrinsicTable
+                  rows={sorted}
+                  updateStock={updateStock}
+                  removeStock={removeStock}
+                  stocks={stocks}
+                  globals={globals}
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  sortToggle={sortToggle}
+                  yahooData={yahooData}
+                />
+              )}
               {tab === "allocation" && <AllocationTable rows={sorted} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
             </>
           )}
@@ -514,7 +536,7 @@ function ScoreCardTable({ rows, updateStock, removeStock, stocks, sortBy, sortDi
   );
 }
 
-function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortBy, sortDir, sortToggle }) {
+function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortBy, sortDir, sortToggle, yahooData }) {
   return (
     <div className="rounded-lg border border-zinc-800 overflow-hidden bg-zinc-950">
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
@@ -536,10 +558,11 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
               <SortHeader col="currentPrice" label="Current Price" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="pctIV" label="% of IV" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <th className="w-8"></th>
+              <th className="w-8"></th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? <EmptyTableRow colSpan={8} message="No stocks tracked. Add a ticker to calculate intrinsic value." /> : rows.map((r) => {
+            {rows.length === 0 ? <EmptyTableRow colSpan={9} message="No stocks tracked. Add a ticker to calculate intrinsic value." /> : rows.map((r) => {
               const idx = stocks.findIndex((s) => s.ticker === r.ticker);
               return (
                 <tr key={r.ticker} className="hairline hover:bg-zinc-900/30 group">
@@ -553,6 +576,22 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
                     <span className={`inline-block px-2 py-0.5 rounded border tabular-nums font-mono text-xs ${ivBg(r.pctIV)} ${ivColor(r.pctIV)}`}>{r.pctIV.toFixed(2)}%</span>
                   </td>
                   <td className="px-2 py-2 text-right">
+                    {yahooData[r.ticker]?.trailingEps != null && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm(
+                            `Apply Yahoo trailing EPS of ${yahooData[r.ticker].trailingEps} to ${r.ticker}?`
+                          )) {
+                            updateStock(idx, { ttmEPS: yahooData[r.ticker].trailingEps });
+                          }
+                        }}
+                        className="text-[10px] font-mono px-2 py-1 rounded border border-emerald-700 text-emerald-400 hover:bg-emerald-900/30 transition"
+                      >
+                        Apply EPS
+                      </button>
+                    )}
+                  </td>
+                  <td className="px-2 py-2 text-right">
                     <button onClick={() => removeStock(idx)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 transition">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -563,6 +602,47 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
           </tbody>
         </table>
       </div>
+      {Object.values(yahooData).some(Boolean) && (
+        <div className="border-t border-zinc-800 px-4 py-4">
+          <div className="text-[11px] uppercase tracking-[0.15em] text-zinc-500 mb-2">
+            Yahoo Finance Reference Data (read-only · not applied automatically)
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr className="hairline">
+                  <th className="px-2 py-1 text-left text-[10px] uppercase tracking-wider text-zinc-600">Ticker</th>
+                  <th className="px-2 py-1 text-left text-[10px] uppercase tracking-wider text-zinc-600">Company</th>
+                  <th className="px-2 py-1 text-right text-[10px] uppercase tracking-wider text-zinc-600">Trailing EPS</th>
+                  <th className="px-2 py-1 text-right text-[10px] uppercase tracking-wider text-zinc-600">Forward EPS</th>
+                  <th className="px-2 py-1 text-right text-[10px] uppercase tracking-wider text-zinc-600">EPS Growth %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(yahooData)
+                  .filter(([, v]) => v != null)
+                  .map(([ticker, q]) => (
+                    <tr key={ticker} className="hairline hover:bg-zinc-900/20">
+                      <td className="px-2 py-1 font-medium text-zinc-300">{ticker}</td>
+                      <td className="px-2 py-1 text-zinc-500">{q.longName ?? "—"}</td>
+                      <td className="px-2 py-1 text-right text-zinc-300">
+                        {q.trailingEps != null ? q.trailingEps.toFixed(2) : "—"}
+                      </td>
+                      <td className="px-2 py-1 text-right text-zinc-300">
+                        {q.forwardEps != null ? q.forwardEps.toFixed(2) : "—"}
+                      </td>
+                      <td className="px-2 py-1 text-right text-zinc-300">
+                        {q.epsGrowthRate != null
+                          ? (q.epsGrowthRate * 100).toFixed(1) + "%"
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

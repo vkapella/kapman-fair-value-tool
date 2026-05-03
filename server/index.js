@@ -2,13 +2,13 @@ import Database from "better-sqlite3";
 import express from "express";
 import fs from "fs";
 import path from "path";
+import yahooFinance from "yahoo-finance2";
 import { fileURLToPath } from "url";
 import { DEFAULT_GLOBALS, SEED_STOCKS } from "../src/lib/defaultData.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 8080;
-const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const defaultDbDir = process.env.NODE_ENV === "production" ? "/data" : path.join(__dirname, "..", ".data");
 const DB_PATH = process.env.SQLITE_DB_PATH || path.join(defaultDbDir, "fair-value.sqlite");
 
@@ -272,33 +272,36 @@ app.put("/api/globals", handleRoute((req, res) => {
   res.json(getGlobals());
 }));
 
-// API: bulk fetch previous-close prices
-app.post("/api/prices", async (req, res) => {
-  if (!POLYGON_KEY) {
-    return res.status(500).json({ error: "POLYGON_API_KEY env var not set on server" });
-  }
+// API: fetch enriched quote data from Yahoo Finance (no API key required)
+app.post("/api/quotes", async (req, res) => {
   const { tickers } = req.body || {};
   if (!Array.isArray(tickers) || tickers.length === 0) {
     return res.status(400).json({ error: "tickers must be a non-empty array" });
   }
 
-  const result = {};
-  await Promise.all(
-    tickers.map(async (raw) => {
-      const t = String(raw).trim().toUpperCase();
-      try {
-        const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(t)}/prev?adjusted=true&apiKey=${POLYGON_KEY}`;
-        const r = await fetch(url);
-        if (!r.ok) return;
-        const d = await r.json();
-        if (d.results && d.results[0] && typeof d.results[0].c === "number") {
-          result[t] = d.results[0].c;
+  try {
+    const result = {};
+    await Promise.all(
+      tickers.map(async (raw) => {
+        const t = String(raw).trim().toUpperCase();
+        try {
+          const quote = await yahooFinance.quote(t, {}, { validateResult: false });
+          result[t] = {
+            previousClose: quote.regularMarketPreviousClose ?? null,
+            trailingEps: quote.trailingEps ?? null,
+            forwardEps: quote.forwardEps ?? null,
+            epsGrowthRate: quote.earningsGrowth ?? null,
+            longName: quote.longName ?? null,
+          };
+        } catch (_) {
+          result[t] = null;
         }
-      } catch (_) { /* skip */ }
-    })
-  );
-
-  res.json(result);
+      })
+    );
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error?.message || "internal server error" });
+  }
 });
 
 // Serve built frontend
@@ -313,5 +316,4 @@ app.get(/^\/(?!api).*/, (req, res) => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Fair Value Evaluator running on :${PORT}`);
   console.log(`SQLite database: ${DB_PATH}`);
-  console.log(`Polygon API key: ${POLYGON_KEY ? "configured" : "NOT SET - refresh will fail"}`);
 });

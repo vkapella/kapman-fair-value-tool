@@ -6,6 +6,85 @@ Modified-Graham intrinsic value tool with manual scorecard and Polygon-backed li
 IV = EPS × (P/E_no_growth + g × Growth%) × (Avg_AAA_Yield / Bond_Yield)
 ```
 
+## Local dev and test commands
+
+Use these commands from the project root. They assume your `.env` file contains `POLYGON_API_KEY=...`.
+
+### Install dependencies
+
+```bash
+npm install
+```
+
+### Run the app for development
+
+This starts Vite on `http://localhost:5173` and Express on `http://localhost:8080`. Vite proxies `/api/*` to Express.
+
+```bash
+set -a
+source .env
+set +a
+npm run dev
+```
+
+Open the app:
+
+```bash
+open http://localhost:5173
+```
+
+### Run a production-like local test
+
+This builds the frontend and serves the built SPA from Express on `http://localhost:8080`.
+
+```bash
+set -a
+source .env
+set +a
+npm run build
+npm run start
+```
+
+In a second terminal window, run these smoke checks:
+
+```bash
+curl -sf http://localhost:8080/ | grep -i "<html"
+
+curl -sf http://localhost:8080/api/data
+
+curl -sf -X POST http://localhost:8080/api/prices \
+  -H "content-type: application/json" \
+  -d '{"tickers":["AAPL","MSFT"]}'
+```
+
+### Run the Docker container locally
+
+This is the closest local match to Fly.io. The bind mount simulates the Fly volume at `/data`.
+
+```bash
+docker build -t kapman-fair-value-tool .
+
+docker run --rm -p 8080:8080 \
+  --env-file .env \
+  -v "$PWD/.docker-data:/data" \
+  kapman-fair-value-tool
+```
+
+In a second terminal window, run:
+
+```bash
+curl -sf http://localhost:8080/ | grep -i "<html"
+curl -sf http://localhost:8080/api/data
+```
+
+### Reset local SQLite data
+
+Development mode stores SQLite data in `.data/fair-value.sqlite`. Docker mode with the command above stores SQLite data in `.docker-data/fair-value.sqlite`.
+
+```bash
+rm -rf .data .docker-data
+```
+
 ## Stack
 - React + Vite (frontend, Tailwind for styling)
 - Express (serves built SPA + SQLite-backed REST API + `/api/prices` Polygon proxy)
@@ -16,7 +95,9 @@ IV = EPS × (P/E_no_growth + g × Growth%) × (Avg_AAA_Yield / Bond_Yield)
 
 ```bash
 npm install
-export POLYGON_API_KEY=your_key_here    # only needed for Refresh Prices
+set -a
+source .env
+set +a
 npm run dev
 ```
 

@@ -154,9 +154,10 @@ export function suggestScore(category, fundamentals, pctIV, globals, overrides =
 
   if (category === "valuation") {
     push("pctIV", "% of intrinsic value", 0.5, (v) => (v < 70 ? 1 : v <= 90 ? 0.8 : v <= 110 ? 0.6 : v <= 130 ? 0.35 : 0.1), pctIV);
-    push("trailingPE", "Trailing P/E", 0.2, (v) => (v < 12 ? 1 : v <= 15 ? 0.8 : v <= 20 ? 0.6 : v <= 25 ? 0.35 : 0.1), all.trailingPE);
+    push("trailingPE", "Trailing P/E", 0.15, (v) => (v < 12 ? 1 : v <= 15 ? 0.8 : v <= 20 ? 0.6 : v <= 25 ? 0.35 : 0.1), all.trailingPE);
+    push("forwardPE", "Forward P/E", 0.1, (v) => (v < 12 ? 1 : v <= 15 ? 0.8 : v <= 20 ? 0.6 : v <= 25 ? 0.35 : 0.1), all.forwardPE);
     push("priceToBook", "Price to book", 0.15, (v) => (v < 1.2 ? 1 : v <= 1.5 ? 0.8 : v <= 3 ? 0.6 : v <= 5 ? 0.35 : 0.1), all.priceToBook);
-    push("debtToEquity", "Debt to equity", 0.1, (v) => (v < 0.5 ? 1 : v <= 1 ? 0.8 : v <= 1.5 ? 0.6 : v <= 2 ? 0.35 : 0.1), all.debtToEquity);
+    push("debtToEquity", "Debt to equity", 0.05, (v) => (v < 0.5 ? 1 : v <= 1 ? 0.8 : v <= 1.5 ? 0.6 : v <= 2 ? 0.35 : 0.1), all.debtToEquity);
     push("currentRatio", "Current ratio", 0.05, (v) => (v > 2 ? 1 : v >= 1.5 ? 0.8 : v >= 1 ? 0.6 : v >= 0.5 ? 0.35 : 0.1), all.currentRatio);
   }
 

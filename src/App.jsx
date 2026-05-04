@@ -537,7 +537,9 @@ function RubricWorksheet({ worksheet, onClose, onApply, globals }) {
     setQualitative(next);
     const initialOverrides = {};
     if (worksheet.category === "valuation") {
-      initialOverrides.pctIV = worksheet.pctIV ?? "";
+      initialOverrides.pctIV = worksheet.pctIV != null
+        ? Math.round(worksheet.pctIV * 100) / 100
+        : "";
     }
     for (const field of def.quantitativeFields) {
       const fetchedValue = field.key === "epsGrowthRate"

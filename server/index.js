@@ -378,7 +378,7 @@ app.post("/api/quotes", async (req, res) => {
               forwardPE: summary?.summaryDetail?.forwardPE ?? null,
               priceToBook: summary?.defaultKeyStatistics?.priceToBook ?? null,
               debtToEquity: summary?.financialData?.debtToEquity ?? null,
-              currentRatio: summary?.summaryDetail?.currentRatio ?? null,
+              currentRatio: summary?.financialData?.currentRatio ?? null,
               revenueGrowth: summary?.financialData?.revenueGrowth ?? null,
               freeCashflow: summary?.financialData?.freeCashflow ?? null,
               totalCash: summary?.financialData?.totalCash ?? null,

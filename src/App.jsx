@@ -166,7 +166,8 @@ export default function App() {
     const sig = allocationSignals(s, iv, pctIV, score);
     const pe = s.ttmEPS > 0 ? s.currentPrice / s.ttmEPS : null;
     const forwardEps = yahooData[s.ticker]?.forwardEps ?? null;
-    return { ...s, pe, forwardEps, iv, pctIV, score, ...sig };
+    const forwardPe = forwardEps > 0 ? s.currentPrice / forwardEps : null;
+    return { ...s, pe, forwardEps, forwardPe, iv, pctIV, score, ...sig };
   }), [stocks, globals, yahooData]);
 
   const sorted = useMemo(() => {
@@ -372,9 +373,6 @@ export default function App() {
                 <h1 className="font-display text-2xl font-bold tracking-tight">Fair Value Evaluator</h1>
                 <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 mt-1">v1.0 · Graham Method</span>
               </div>
-              <p className="text-xs text-zinc-500 mt-1 ml-11 font-mono">
-                IV = EPS × ({globals.peNoGrowth} + {globals.g} × g%) × ({globals.avgYieldAAA} / {globals.bondYield})
-              </p>
             </div>
             <div className="flex items-center gap-2">
               <div className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
@@ -424,8 +422,8 @@ export default function App() {
         <div className="border-b border-zinc-800 bg-zinc-950">
           <div className="max-w-[1500px] mx-auto px-6 py-4 grid grid-cols-4 gap-6">
             <Stat label="Tracked" value={rows.length} sub="tickers" />
-            <Stat label="Buy Zone" value={stats.buyZone} sub="score≥75 & under IV" tone="emerald" />
-            <Stat label="Overvalued" value={stats.overvalued} sub="≥110% of IV" tone="rose" />
+            <Stat label="Buy Zone" value={stats.buyZone} sub="score≥75 & under Intrinsic Value" tone="emerald" />
+            <Stat label="Overvalued" value={stats.overvalued} sub="≥110% of Intrinsic Value" tone="rose" />
             <Stat label="Avg Score" value={stats.avgScore.toFixed(1)} sub="of 100" />
           </div>
         </div>
@@ -514,6 +512,17 @@ function formatFieldValue(value, format) {
   return String(value);
 }
 
+function valuationRangeHint(key) {
+  const ranges = {
+    pctIV: "<70 | 70–90 | 90–110 | 110–130 | >130",
+    trailingPE: "<12 | 12–15 | 15–20 | 20–25 | >25",
+    priceToBook: "<1.2 | 1.2–1.5 | 1.5–3 | 3–5 | >5",
+    debtToEquity: "<0.5 | 0.5–1.0 | 1.0–1.5 | 1.5–2.0 | >2.0",
+    currentRatio: ">2.0 | 1.5–2.0 | 1.0–1.5 | 0.5–1.0 | <0.5",
+  };
+  return ranges[key] || null;
+}
+
 function RubricWorksheet({ worksheet, onClose, onApply, globals }) {
   const def = RUBRIC_DEF[worksheet.category];
   const [overrides, setOverrides] = useState({});
@@ -526,7 +535,17 @@ function RubricWorksheet({ worksheet, onClose, onApply, globals }) {
       next[field.key] = Math.floor((optionsLength - 1) / 2);
     }
     setQualitative(next);
-    setOverrides({});
+    const initialOverrides = {};
+    if (worksheet.category === "valuation") {
+      initialOverrides.pctIV = worksheet.pctIV ?? "";
+    }
+    for (const field of def.quantitativeFields) {
+      const fetchedValue = field.key === "epsGrowthRate"
+        ? worksheet.epsGrowthRate
+        : worksheet.fundamentals?.[field.key];
+      initialOverrides[field.key] = fetchedValue ?? "";
+    }
+    setOverrides(initialOverrides);
   }, [worksheet.ticker, worksheet.category]);
 
   const { suggested, breakdown } = suggestScore(
@@ -538,6 +557,17 @@ function RubricWorksheet({ worksheet, onClose, onApply, globals }) {
   );
 
   const breakdownByKey = new Map(breakdown.map((entry) => [entry.key, entry]));
+  const quantitativeFields = worksheet.category === "valuation"
+    ? [
+      {
+        key: "pctIV",
+        label: "% of Intrinsic Value",
+        format: "number",
+        description: "Current price as a percentage of intrinsic value",
+      },
+      ...def.quantitativeFields,
+    ]
+    : def.quantitativeFields;
 
   return (
     <div
@@ -555,7 +585,7 @@ function RubricWorksheet({ worksheet, onClose, onApply, globals }) {
 
         <div className="px-4 pt-4 text-[10px] uppercase tracking-[0.2em] text-zinc-500">Quantitative Inputs</div>
         <div className="px-4 pb-4 space-y-2 mt-2">
-          {def.quantitativeFields.map((field) => {
+          {quantitativeFields.map((field) => {
             const entry = breakdownByKey.get(field.key);
             const bandTone = entry?.contribution >= (def.max * 0.16) ? "text-emerald-300" : entry?.contribution >= (def.max * 0.09) ? "text-amber-300" : "text-rose-300";
             return (
@@ -563,8 +593,11 @@ function RubricWorksheet({ worksheet, onClose, onApply, globals }) {
                 <div>
                   <div className="text-zinc-200">{field.label}</div>
                   <div className="text-zinc-500 text-[10px]">{field.description}</div>
+                  {worksheet.category === "valuation" && (
+                    <div className="text-zinc-600 text-[10px] mt-0.5">{valuationRangeHint(field.key)}</div>
+                  )}
                 </div>
-                <div className="text-zinc-300 font-mono text-xs">{formatFieldValue(worksheet.fundamentals?.[field.key] ?? (field.key === "epsGrowthRate" ? worksheet.epsGrowthRate : null), field.format)}</div>
+                <div className="text-zinc-300 font-mono text-xs">{formatFieldValue(field.key === "pctIV" ? worksheet.pctIV : (worksheet.fundamentals?.[field.key] ?? (field.key === "epsGrowthRate" ? worksheet.epsGrowthRate : null)), field.format)}</div>
                 <input
                   value={overrides[field.key] ?? ""}
                   onChange={(e) => {
@@ -673,7 +706,7 @@ function ScoreCardTable({ rows, updateStock, removeStock, stocks, sortBy, sortDi
           <thead className="bg-zinc-900/50">
             <tr className="hairline">
               <SortHeader col="ticker" label="Ticker" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} align="left" />
-              <SortHeader col="pctIV" label="% of IV" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
+              <SortHeader col="pctIV" label="% of Intrinsic Value" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="valuation" label="Valuation /20" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="growthScore" label="Growth /20" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="moat" label="Moat /20" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
@@ -719,9 +752,9 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
         <div>
           <h2 className="font-display text-lg font-bold">Intrinsic Value Calculation</h2>
-          <p className="text-[11px] text-zinc-500 font-mono">Click EPS, Growth, or Price to edit. IV recalculates instantly.</p>
+          <p className="text-[11px] text-zinc-500 font-mono">Click EPS, Growth, or Price to edit. Intrinsic Value recalculates instantly.</p>
         </div>
-        <div className="text-[10px] text-zinc-500 font-mono">P/E:{globals.peNoGrowth} · g:{globals.g} · AAA:{globals.avgYieldAAA} · Bond:{globals.bondYield}</div>
+        <div className="text-[10px] text-zinc-500 font-mono">IV = EPS × (7 + 1 × g%) × (4.4 / 4.4)</div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -729,17 +762,18 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
             <tr className="hairline">
               <SortHeader col="ticker" label="Ticker" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} align="left" />
               <SortHeader col="pe" label="P/E" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
+              <SortHeader col="forwardPe" label="Forward P/E" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="ttmEPS" label="Trailing EPS" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="forwardEps" label="Forward EPS" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="growth" label="EPS Growth %" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="iv" label="Intrinsic Value" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <SortHeader col="currentPrice" label="Current Price" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-              <SortHeader col="pctIV" label="% of IV" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
+              <SortHeader col="pctIV" label="% of Intrinsic Value" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <th className="px-2 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-zinc-500">Updated Date</th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? <EmptyTableRow colSpan={9} message="No stocks tracked. Add a ticker to calculate intrinsic value." /> : rows.map((r) => {
+            {rows.length === 0 ? <EmptyTableRow colSpan={10} message="No stocks tracked. Add a ticker to calculate intrinsic value." /> : rows.map((r) => {
               const idx = stocks.findIndex((s) => s.ticker === r.ticker);
               return (
                 <tr key={r.ticker} className="hairline hover:bg-zinc-900/30 group">
@@ -753,6 +787,9 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums font-mono text-xs text-zinc-300">
                     {r.pe != null ? r.pe.toFixed(1) : "—"}
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums font-mono text-xs text-zinc-300">
+                    {r.forwardPe != null ? r.forwardPe.toFixed(1) : "—"}
                   </td>
                   <td className="px-2 py-2 text-right"><NumCell value={r.ttmEPS} onChange={(v) => updateStock(idx, { ttmEPS: v })} decimals={2} width="w-20" /></td>
                   <td className="px-2 py-2 text-right tabular-nums font-mono text-xs text-zinc-300">
@@ -782,7 +819,7 @@ function AllocationTable({ rows, sortBy, sortDir, sortToggle }) {
     <div className="rounded-lg border border-zinc-800 overflow-hidden bg-zinc-950">
       <div className="px-4 py-3 border-b border-zinc-800">
         <h2 className="font-display text-lg font-bold">Allocation Signals</h2>
-        <p className="text-[11px] text-zinc-500 font-mono">Algorithmic defaults from Score × % of IV.</p>
+        <p className="text-[11px] text-zinc-500 font-mono">Algorithmic defaults from Score × % of Intrinsic Value.</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -790,7 +827,7 @@ function AllocationTable({ rows, sortBy, sortDir, sortToggle }) {
             <tr className="hairline">
               <SortHeader col="ticker" label="Ticker" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} align="left" />
               <SortHeader col="score" label="Score" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-              <SortHeader col="pctIV" label="% of IV" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
+              <SortHeader col="pctIV" label="% of Intrinsic Value" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-zinc-500">Buy Shares</th>
               <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-zinc-500">Sell Puts</th>
               <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-zinc-500">Buy Calls</th>

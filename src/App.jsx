@@ -754,7 +754,7 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
           <h2 className="font-display text-lg font-bold">Intrinsic Value Calculation</h2>
           <p className="text-[11px] text-zinc-500 font-mono">Click EPS, Growth, or Price to edit. Intrinsic Value recalculates instantly.</p>
         </div>
-        <div className="text-[10px] text-zinc-500 font-mono">IV = EPS × (7 + 1 × g%) × (4.4 / 4.4)</div>
+        <div className="text-[10px] text-zinc-500 font-mono">Intrinsic Value = EPS × (PE_no_growth + g × Growth%) × (Avg_AAA_Yield / Bond_Yield)</div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

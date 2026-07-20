@@ -1,4 +1,4 @@
-app = "fair-value-evaluator"
+app = "kapman-fair-value-tool"
 primary_region = "iad"
 
 [build]

@@ -425,12 +425,24 @@ app.post("/api/quotes", async (req, res) => {
   }
 });
 
-// Serve built frontend
+// Serve built frontend. Vite assets are content-hashed -> cache forever;
+// index.html must never be cached or browsers keep running stale app code
+// against a newer API after deploys.
 const distDir = path.join(__dirname, "..", "dist");
-app.use(express.static(distDir));
+app.use(express.static(distDir, {
+  index: false,
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith(".html")) {
+      res.setHeader("Cache-Control", "no-store");
+    } else {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    }
+  },
+}));
 
 // SPA fallback (anything not /api/* falls through to index.html)
 app.get(/^\/(?!api).*/, (req, res) => {
+  res.set("Cache-Control", "no-store");
   res.sendFile(path.join(distDir, "index.html"));
 });
 

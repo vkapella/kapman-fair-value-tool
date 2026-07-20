@@ -283,7 +283,9 @@ export default function App() {
         const price = quote.currentPrice ?? quote.previousClose;
         if (price != null) patch.currentPrice = price;
         if (quote.trailingEps != null) patch.ttmEPS = quote.trailingEps;
-        if (quote.epsGrowthRate != null) patch.growth = quote.epsGrowthRate * 100;
+        // Never auto-overwrite `growth`: it is the operator's curated forward
+        // 7-10yr estimate (Graham input). Fetched trailing YoY growth remains
+        // visible in the valuation worksheet as reference only.
 
         return Object.keys(patch).length > 1 ? { stock, patch } : null;
       }).filter(Boolean);

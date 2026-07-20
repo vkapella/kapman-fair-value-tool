@@ -59,13 +59,23 @@ export async function fetchTickerFundamentals(ticker) {
 
   // Finnhub returns an all-zero quote object for unknown symbols.
   const unknownQuote = num(quote.c) === 0 && num(quote.t) === 0;
+  const currentPrice = unknownQuote ? null : num(quote.c);
+
+  // metric.epsTTM is per-share of the PRIMARY listing — wrong currency for
+  // ADRs (TSM: TWD) and wrong share class for duals (BRK.B: Class-A level).
+  // P/E is dimensionless, so US price ÷ peTTM yields EPS in the traded
+  // share's own currency and class. Underivable -> null (Yahoo back-fills).
+  const peTTM = num(metric.peTTM);
+  const trailingEps = currentPrice != null && peTTM != null && peTTM > 0
+    ? currentPrice / peTTM
+    : null;
 
   return {
     ok: true,
     errors,
-    currentPrice: unknownQuote ? null : num(quote.c),
+    currentPrice,
     previousClose: unknownQuote ? null : num(quote.pc),
-    trailingEps: num(metric.epsTTM),
+    trailingEps,
     epsGrowthRate: fraction(metric.epsGrowthTTMYoy),
     longName: profile.name || null,
     fundamentals: {

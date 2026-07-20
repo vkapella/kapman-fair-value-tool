@@ -5,6 +5,7 @@ import path from "path";
 import YahooFinance from "yahoo-finance2";
 import { fileURLToPath } from "url";
 import { DEFAULT_GLOBALS, SEED_STOCKS } from "../src/lib/defaultData.js";
+import { fetchFundamentalsBatch, finnhubConfigured } from "./lib/finnhub.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -342,7 +343,9 @@ app.post("/api/prices", async (req, res) => {
   }
 });
 
-// API: fetch enriched quote data from Yahoo Finance (no API key required)
+// API: fetch enriched quote data. Finnhub (keyed, stable) is the primary
+// fundamentals source; Yahoo back-fills only the fields Finnhub's free tier
+// lacks (ownership, short interest, cash/debt/FCF levels, forward EPS).
 app.post("/api/quotes", async (req, res) => {
   const { tickers } = req.body || {};
   if (!Array.isArray(tickers) || tickers.length === 0) {
@@ -350,10 +353,12 @@ app.post("/api/quotes", async (req, res) => {
   }
 
   try {
+    const normalized = [...new Set(tickers.map((raw) => String(raw || "").trim().toUpperCase()).filter(Boolean))];
+    const finnhubByTicker = finnhubConfigured() ? await fetchFundamentalsBatch(normalized) : {};
+
     const result = {};
     await Promise.all(
-      tickers.map(async (raw) => {
-        const t = String(raw).trim().toUpperCase();
+      normalized.map(async (t) => {
         const yahooSymbol = yahooSymbolFromTicker(t);
         try {
           const [quote, summary] = await Promise.all([
@@ -365,39 +370,46 @@ app.post("/api/quotes", async (req, res) => {
             ).catch(() => null),
           ]);
 
+          const fh = finnhubByTicker[t]?.ok ? finnhubByTicker[t] : null;
+          // Yahoo reports debtToEquity as a percentage; rubric bands expect a ratio.
+          const yahooDebtToEquity = summary?.financialData?.debtToEquity != null
+            ? summary.financialData.debtToEquity / 100
+            : null;
+
           result[t] = {
-            currentPrice: quote?.regularMarketPrice ?? summary?.price?.regularMarketPrice ?? null,
-            previousClose: quote?.regularMarketPreviousClose ?? summary?.price?.regularMarketPreviousClose ?? null,
-            trailingEps: summary?.defaultKeyStatistics?.trailingEps ?? quote?.trailingEps ?? null,
+            currentPrice: fh?.currentPrice ?? quote?.regularMarketPrice ?? summary?.price?.regularMarketPrice ?? null,
+            previousClose: fh?.previousClose ?? quote?.regularMarketPreviousClose ?? summary?.price?.regularMarketPreviousClose ?? null,
+            trailingEps: fh?.trailingEps ?? summary?.defaultKeyStatistics?.trailingEps ?? quote?.trailingEps ?? null,
             forwardEps: summary?.defaultKeyStatistics?.forwardEps ?? quote?.forwardEps ?? null,
-            epsGrowthRate: summary?.financialData?.earningsGrowth ?? quote?.earningsGrowth ?? null,
-            longName: quote?.longName ?? summary?.price?.longName ?? summary?.price?.shortName ?? null,
+            epsGrowthRate: fh?.epsGrowthRate ?? summary?.financialData?.earningsGrowth ?? quote?.earningsGrowth ?? null,
+            longName: fh?.longName ?? quote?.longName ?? summary?.price?.longName ?? summary?.price?.shortName ?? null,
+            source: { finnhub: Boolean(fh), yahoo: Boolean(quote || summary) },
             fundamentals: {
               ...emptyFundamentals(),
-              trailingPE: summary?.summaryDetail?.trailingPE ?? null,
-              forwardPE: summary?.summaryDetail?.forwardPE ?? null,
-              priceToBook: summary?.defaultKeyStatistics?.priceToBook ?? null,
-              debtToEquity: summary?.financialData?.debtToEquity ?? null,
-              currentRatio: summary?.financialData?.currentRatio ?? null,
-              revenueGrowth: summary?.financialData?.revenueGrowth ?? null,
+              trailingPE: fh?.fundamentals.trailingPE ?? summary?.summaryDetail?.trailingPE ?? null,
+              forwardPE: fh?.fundamentals.forwardPE ?? summary?.summaryDetail?.forwardPE ?? null,
+              priceToBook: fh?.fundamentals.priceToBook ?? summary?.defaultKeyStatistics?.priceToBook ?? null,
+              debtToEquity: fh?.fundamentals.debtToEquity ?? yahooDebtToEquity,
+              currentRatio: fh?.fundamentals.currentRatio ?? summary?.financialData?.currentRatio ?? null,
+              revenueGrowth: fh?.fundamentals.revenueGrowth ?? summary?.financialData?.revenueGrowth ?? null,
               freeCashflow: summary?.financialData?.freeCashflow ?? null,
               totalCash: summary?.financialData?.totalCash ?? null,
               totalDebt: summary?.financialData?.totalDebt ?? null,
-              returnOnEquity: summary?.financialData?.returnOnEquity ?? null,
-              returnOnAssets: summary?.financialData?.returnOnAssets ?? null,
-              grossMargins: summary?.financialData?.grossMargins ?? null,
-              operatingMargins: summary?.financialData?.operatingMargins ?? null,
-              profitMargins: summary?.financialData?.profitMargins ?? null,
-              revenuePerShare: summary?.financialData?.revenuePerShare ?? null,
-              beta: summary?.summaryDetail?.beta ?? null,
-              sector: summary?.assetProfile?.sector ?? null,
-              industry: summary?.assetProfile?.industry ?? null,
-              marketCap: summary?.summaryDetail?.marketCap ?? null,
-              fiftyTwoWeekHigh: summary?.summaryDetail?.fiftyTwoWeekHigh ?? null,
-              fiftyTwoWeekLow: summary?.summaryDetail?.fiftyTwoWeekLow ?? null,
-              dividendYield: summary?.summaryDetail?.dividendYield ?? null,
+              returnOnEquity: fh?.fundamentals.returnOnEquity ?? summary?.financialData?.returnOnEquity ?? null,
+              returnOnAssets: fh?.fundamentals.returnOnAssets ?? summary?.financialData?.returnOnAssets ?? null,
+              grossMargins: fh?.fundamentals.grossMargins ?? summary?.financialData?.grossMargins ?? null,
+              operatingMargins: fh?.fundamentals.operatingMargins ?? summary?.financialData?.operatingMargins ?? null,
+              profitMargins: fh?.fundamentals.profitMargins ?? summary?.financialData?.profitMargins ?? null,
+              revenuePerShare: fh?.fundamentals.revenuePerShare ?? summary?.financialData?.revenuePerShare ?? null,
+              beta: fh?.fundamentals.beta ?? summary?.summaryDetail?.beta ?? null,
+              sector: summary?.assetProfile?.sector ?? fh?.fundamentals.sector ?? null,
+              industry: summary?.assetProfile?.industry ?? fh?.fundamentals.industry ?? null,
+              marketCap: fh?.fundamentals.marketCap ?? summary?.summaryDetail?.marketCap ?? null,
+              fiftyTwoWeekHigh: fh?.fundamentals.fiftyTwoWeekHigh ?? summary?.summaryDetail?.fiftyTwoWeekHigh ?? null,
+              fiftyTwoWeekLow: fh?.fundamentals.fiftyTwoWeekLow ?? summary?.summaryDetail?.fiftyTwoWeekLow ?? null,
+              dividendYield: fh?.fundamentals.dividendYield ?? summary?.summaryDetail?.dividendYield ?? null,
               shortPercentOfFloat: summary?.defaultKeyStatistics?.shortPercentOfFloat ?? null,
-              sharesOutstanding: summary?.defaultKeyStatistics?.sharesOutstanding ?? null,
+              sharesOutstanding: fh?.fundamentals.sharesOutstanding ?? summary?.defaultKeyStatistics?.sharesOutstanding ?? null,
               insidersPercentHeld: summary?.majorHoldersBreakdown?.insidersPercentHeld ?? null,
               institutionsPercentHeld: summary?.majorHoldersBreakdown?.institutionsPercentHeld ?? null,
             },

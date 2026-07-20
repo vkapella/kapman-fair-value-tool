@@ -19,125 +19,37 @@ Use `README.md` and source code as the source of truth for current scope and acc
 - Before editing, inspect existing files and follow established patterns.
 - After each meaningful change, run the narrowest relevant validation step.
 
-## Git and GitHub workflow — FULLY AUTONOMOUS
+## Git and GitHub workflow (simplified protocol — direct-to-main)
 
-For every fix or feature, execute ALL of the following steps without stopping
-for human input. Do not report steps as "manual" unless a true permission
-blocker prevents execution.
+Work directly on `main`. No feature branches, no pull requests, no review
+ceremony. Execute all steps autonomously.
 
-### Step 1 — Create a GitHub issue before writing any code
-
-```bash
-gh issue create --title "<short title>" --body "<acceptance criteria>"
-```
-
-Note the issue number returned. All subsequent commits and the PR must
-reference this issue number.
-
-### Step 2 — Create a feature branch named after the issue
-
-```bash
-git checkout -b fix/KM-NNN-short-description
-```
-
-### Step 3 — Implement, then commit with issue reference in every commit message
-
-```bash
-git commit -m "fix: <description> (closes #NNN)"
-```
-
-### Step 4 — Run the full validation suite yourself — do not skip any step
-
-```bash
-npm run build
-npm run start -- --help >/dev/null 2>&1 || true
-```
-
-Then run local smoke checks against a running server:
-
-```bash
-curl -sf http://localhost:8080/ | grep -i "<html"
-curl -sf -X POST http://localhost:8080/api/prices \
-  -H "content-type: application/json" \
-  -d '{"tickers":["AAPL"]}'
-```
-
-If any command exits non-zero, fix all failures before proceeding.
-Do not proceed with a broken build. Do not report failures to the human
-and ask what to do — fix them.
-
-### Step 5 — Push the branch
-
-```bash
-git push -u origin fix/KM-NNN-short-description
-```
-
-### Step 6 — Open a PR and enable auto-merge in a single pipeline
-
-```bash
-gh pr create --title "<title>" --body "Closes #NNN" --base main
-gh pr merge --auto --squash
-```
-
-Both commands must succeed before continuing.
-
-### Step 7 — Verify auto-merge was accepted
-
-```bash
-gh pr view --json autoMergeRequest
-```
-
-If `autoMergeRequest` is null, report the exact blocker and the exact
-`gh` command the human must run to unblock it. Do not say "please merge
-manually" without providing the specific unblocking command.
-
-### Step 8 — Run smoke tests yourself using curl
-
-After local startup succeeds, execute these yourself — do not give
-the human commands to run:
-
-```bash
-curl -sf http://localhost:8080/ | grep -i "<html"
-curl -sf -X POST http://localhost:8080/api/prices \
-  -H "content-type: application/json" \
-  -d '{"tickers":["AAPL","MSFT"]}'
-```
-
-If either fails, fix the failure before marking the issue closed.
-
-### Step 9 — Close the GitHub issue with PR reference
-
-```bash
-gh issue close NNN --comment "Resolved in PR #<pr-number>"
-```
-
-### Step 10 — Clean up the local checkout after merge
-
-After the PR is merged or auto-merge completes, return the local workspace to
-`main` before reporting completion:
-
-```bash
-git switch main
-git pull --ff-only origin main
-git status -sb
-```
-
-The final status must show `main` tracking `origin/main` with no uncommitted
-changes. Do not leave the local checkout on a closed PR branch.
+- **Every change starts with a GitHub issue** containing the story: what is
+  changing, why, and how it will be validated. Use `gh issue create` before
+  writing code.
+- Reference the issue in the commit body (`Refs #N` or `closes #N`). Small
+  atomic commits; one story may span several commits.
+- **Run the full validation suite before committing** (see Testing and
+  validation below). Fix failures yourself — do not proceed with a broken
+  build or report failures to the human and ask what to do.
+- **After validation passes, sync immediately**: push to `origin/main` so
+  GitHub never trails tested local work. Never push known-broken code; never
+  force-push `main`.
+- Close the issue with a short summary comment: what shipped, what validation
+  ran (build / smoke / deploy verify), and any follow-ups.
 
 ### Definition of done — automated checklist
 
 Work on an issue is NOT complete unless ALL of the following are confirmed
 by you, not reported to the human for confirmation:
 
-- [ ] GitHub issue exists and is linked to the PR
+- [ ] GitHub issue exists and is referenced by the commit(s)
 - [ ] `npm run build` exits 0
 - [ ] App serves SPA at `http://localhost:8080`
-- [ ] `/api/prices` responds to valid POST requests
-- [ ] PR is open and auto-merge is enabled (verified via `gh pr view --json autoMergeRequest`)
+- [ ] `/api/prices` and `/api/quotes` respond to valid POST requests
 - [ ] Smoke test curl commands return expected output
-- [ ] GitHub issue is closed with PR reference
-- [ ] Local checkout is back on `main`, fast-forwarded from `origin/main`, with a clean `git status -sb`
+- [ ] Work is pushed to `origin/main`
+- [ ] GitHub issue is closed with a summary comment
 
 Only after all checklist items are confirmed should you report completion to the human.
 
@@ -174,7 +86,10 @@ New files should follow this layout:
 ## Environment requirements
 Required environment variables:
 - `PORT` (optional in local; defaults to `8080`)
-- `POLYGON_API_KEY` (required for live price refresh)
+- `FINNHUB_API_KEY` (primary fundamentals source for `/api/quotes`; free tier,
+  60 calls/min, shared with kapman-finnhub-mcp-server; `FINHUB_API_KEY`
+  accepted as fallback spelling. Without it, `/api/quotes` degrades to
+  Yahoo-only — functional but fragile.)
 
 Rules:
 - Never hardcode secrets.
@@ -256,9 +171,8 @@ Work is not complete unless all of the following are true and confirmed by you:
 - Local checkout is restored to `main` and clean
 
 ## Off-limits
-- No direct-to-`main` pushes unless explicitly requested
 - No exposing secrets in code, logs, screenshots, or issue comments
-- No browser-direct Polygon calls
+- No browser-direct market-data calls (Finnhub and Yahoo stay server-side)
 - No silent failures for malformed API inputs
 - No leaving work half-complete with TODO deferrals for in-scope requirements
 - No instructing the human to run tests, merge PRs, or close issues manually when automation is possible

@@ -1,6 +1,6 @@
 # Fair Value Evaluator
 
-Modified-Graham intrinsic value tool with manual scorecard and Polygon-backed live price refresh. Deploys to Fly.io as a single Node container.
+Modified-Graham intrinsic value tool with manual scorecard, Yahoo-backed live price refresh, and Finnhub-first fundamentals. Deploys to Fly.io as a single Node container.
 
 ```
 IV = EPS × (P/E_no_growth + g × Growth%) × (Avg_AAA_Yield / Bond_Yield)
@@ -8,7 +8,7 @@ IV = EPS × (P/E_no_growth + g × Growth%) × (Avg_AAA_Yield / Bond_Yield)
 
 ## Local dev and test commands
 
-Use these commands from the project root. They assume your `.env` file contains `POLYGON_API_KEY=...`.
+Use these commands from the project root. They assume your `.env` file contains `FINNHUB_API_KEY=...` (free key from https://finnhub.io/dashboard; without it `/api/quotes` falls back to Yahoo-only fundamentals).
 
 ### Install dependencies
 
@@ -87,7 +87,7 @@ rm -rf .data .docker-data
 
 ## Stack
 - React + Vite (frontend, Tailwind for styling)
-- Express (serves built SPA + SQLite-backed REST API + `/api/prices` Polygon proxy)
+- Express (serves built SPA + SQLite-backed REST API + `/api/prices` price refresh + `/api/quotes` Finnhub/Yahoo fundamentals)
 - SQLite via `better-sqlite3` for persisted watchlist and formula variables
 - Fly.io (single shared-CPU 256MB machine)
 
@@ -136,7 +136,7 @@ Launch the app (first deploy):
 ```bash
 fly launch --no-deploy --copy-config --name fair-value-evaluator
 fly volumes create fair_value_data --region iad --size 1 --app fair-value-evaluator
-fly secrets set POLYGON_API_KEY=your_polygon_key_here
+fly secrets set FINNHUB_API_KEY=your_finnhub_key_here
 fly deploy
 ```
 
@@ -176,7 +176,7 @@ fair-value-evaluator/
 │   ├── main.jsx         # React entry
 │   └── index.css        # Tailwind + global styles
 ├── server/
-│   └── index.js         # Express server + Polygon proxy
+│   └── index.js         # Express server + market-data endpoints
 ├── index.html           # Vite HTML template
 ├── package.json
 ├── vite.config.js       # Vite + dev API proxy
@@ -207,11 +207,12 @@ fly volumes create fair_value_data --region iad --size 1 --app fair-value-evalua
 
 The `fly.toml` mount maps that volume to `/data`, so the watchlist survives app restarts and deployments.
 
-## Polygon API
+## Market data sources
 
-The server uses Polygon's `/v2/aggs/ticker/{ticker}/prev` endpoint (previous-close). Free tier works but is rate-limited to 5 req/min — fine for ~16 tickers if you wait between refreshes. For higher volume, upgrade your Polygon plan.
+- **Prices** (`/api/prices`): Yahoo Finance via `yahoo-finance2` (no key required).
+- **Fundamentals** (`/api/quotes`): Finnhub free tier is the primary source (key required, 60 calls/min, US symbols); Yahoo back-fills ownership, short interest, cash/debt/FCF levels, and forward EPS. Finnhub values are unit-normalized to fractions/absolute dollars to match the rubric.
 
-Get a key: https://polygon.io/dashboard
+Get a Finnhub key: https://finnhub.io/dashboard (the key is shared with kapman-finnhub-mcp-server — both draw from the same 60 calls/min budget).
 
 ## Cost on Fly.io
 
@@ -221,8 +222,8 @@ A single shared-cpu-1x@256MB machine with `auto_stop_machines = "stop"` costs ro
 
 | Symptom | Fix |
 |---|---|
-| `Refresh failed: HTTP 500` | `POLYGON_API_KEY` not set. Run `fly secrets set POLYGON_API_KEY=...` |
-| `Refresh failed: HTTP 429` | Polygon free-tier rate limit. Wait 60s. |
+| Fundamentals mostly null | `FINNHUB_API_KEY` not set (Yahoo fallback also failing). Run `fly secrets set FINNHUB_API_KEY=...` |
+| `Refresh failed: HTTP 429` | Finnhub free-tier rate limit (60 calls/min). Wait 60s. |
 | App won't load after deploy | `fly logs` to see startup errors |
 | Build fails on Fly | Check `fly logs` during `fly deploy`; usually a Node version mismatch |
 

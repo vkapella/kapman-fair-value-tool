@@ -1,5 +1,16 @@
 # Handoff — app watchlist vs. IWB Stock Sheet 4.0
 
+> **Status 7/26/26 (local session):** Prod read via `/api/data` — refresh HAS
+> been run (all 16 rows stamped 7/26/26, MU self-corrected to 44.69), and QQQ
+> (27.94) / VOO (31.24) are frozen at April EPS exactly as predicted in
+> finding 1. Fixes 1 and 2 are implemented on this branch: refresh stamps
+> `updated` only when EPS actually refreshed, fund-type tickers (Yahoo
+> `quoteType` ETF/MUTUALFUND, now exposed by `/api/quotes`) are curated-EPS
+> like `growth`, price-only rows are named in the refresh message, and a
+> "curated" badge shows in the Intrinsic Value table. Verified end-to-end
+> against live providers. Remaining: items 3 (sheet import — also fixes prod's
+> already-lying QQQ/VOO dates) and 4 (promote `economy` to a global).
+
 Context for continuing this work in a local Claude Code session.
 Investigation was done in a cloud session that could not reach prod
 (`kapman-fair-value-tool.fly.dev` is not on that environment's egress

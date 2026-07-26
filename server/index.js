@@ -383,6 +383,7 @@ app.post("/api/quotes", async (req, res) => {
             forwardEps: summary?.defaultKeyStatistics?.forwardEps ?? quote?.forwardEps ?? null,
             epsGrowthRate: fh?.epsGrowthRate ?? summary?.financialData?.earningsGrowth ?? quote?.earningsGrowth ?? null,
             longName: fh?.longName ?? quote?.longName ?? summary?.price?.longName ?? summary?.price?.shortName ?? null,
+            quoteType: quote?.quoteType ?? summary?.price?.quoteType ?? null,
             source: { finnhub: Boolean(fh), yahoo: Boolean(quote || summary) },
             fundamentals: {
               ...emptyFundamentals(),

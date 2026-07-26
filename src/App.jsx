@@ -23,6 +23,12 @@ const allocationSignals = (s, iv, pctIV, score) => {
 
 const fmtMoney = (n) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// Funds have no provider EPS (Finnhub /stock/metric and Yahoo key statistics
+// both return nothing for ETFs), so their ttmEPS is operator-curated like
+// `growth` and refresh must never touch it.
+const FUND_QUOTE_TYPES = new Set(["ETF", "MUTUALFUND"]);
+const isFundQuote = (quote) => FUND_QUOTE_TYPES.has(quote?.quoteType);
+
 const ivColor = (pct) =>
   pct < 80 ? "text-emerald-400" : pct < 100 ? "text-emerald-300" : pct < 110 ? "text-amber-300" : "text-rose-400";
 const ivBg = (pct) =>
@@ -167,7 +173,9 @@ export default function App() {
     const pe = s.ttmEPS > 0 ? s.currentPrice / s.ttmEPS : null;
     const forwardEps = yahooData[s.ticker]?.forwardEps ?? null;
     const forwardPe = forwardEps > 0 ? s.currentPrice / forwardEps : null;
-    return { ...s, pe, forwardEps, forwardPe, iv, pctIV, score, ...sig };
+    const quote = yahooData[s.ticker];
+    const epsCurated = quote ? isFundQuote(quote) || quote.trailingEps == null : false;
+    return { ...s, pe, forwardEps, forwardPe, iv, pctIV, score, epsCurated, ...sig };
   }), [stocks, globals, yahooData]);
 
   const sorted = useMemo(() => {
@@ -259,7 +267,7 @@ export default function App() {
 
   const refreshPrices = async () => {
     setRefreshing(true);
-    setRefreshMsg("Fetching live quotes from Yahoo Finance…");
+    setRefreshMsg("Fetching live quotes…");
     try {
       const tickers = stocks.map((s) => s.ticker);
       const res = await fetch("/api/quotes", {
@@ -279,15 +287,21 @@ export default function App() {
         const quote = quoteMap[stock.ticker];
         if (!quote) return null;
 
-        const patch = { updated: today };
+        const patch = {};
         const price = quote.currentPrice ?? quote.previousClose;
         if (price != null) patch.currentPrice = price;
-        if (quote.trailingEps != null) patch.ttmEPS = quote.trailingEps;
+        // `updated` moves only when the valuation denominator (EPS) refreshes.
+        // A price-only refresh must keep the old date, or a row with frozen
+        // EPS advertises itself as current while its IV drifts stale.
+        if (!isFundQuote(quote) && quote.trailingEps != null) {
+          patch.ttmEPS = quote.trailingEps;
+          patch.updated = today;
+        }
         // Never auto-overwrite `growth`: it is the operator's curated forward
         // 7-10yr estimate (Graham input). Fetched trailing YoY growth remains
         // visible in the valuation worksheet as reference only.
 
-        return Object.keys(patch).length > 1 ? { stock, patch } : null;
+        return Object.keys(patch).length > 0 ? { stock, patch } : null;
       }).filter(Boolean);
 
       const savedStocks = await Promise.all(
@@ -302,8 +316,13 @@ export default function App() {
         savedStocks.map(({ oldTicker, saved }) => [oldTicker, saved])
       );
       setStocks((prev) => prev.map((s) => savedByTicker.get(s.ticker) || s));
+      const priceOnly = updates
+        .filter(({ patch }) => patch.ttmEPS == null)
+        .map(({ stock }) => stock.ticker);
       setRefreshMsg(
-        `Updated ${savedStocks.length}/${stocks.length} rows from Yahoo Finance`
+        priceOnly.length === 0
+          ? `Updated ${savedStocks.length}/${stocks.length} rows`
+          : `Updated ${savedStocks.length}/${stocks.length} rows — price-only (EPS stays curated): ${priceOnly.join(", ")}`
       );
     } catch (e) {
       setRefreshMsg(`Refresh failed: ${e.message}`);
@@ -795,11 +814,22 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
                   <td className="px-2 py-2 text-right tabular-nums font-mono text-xs text-zinc-300">
                     {r.forwardPe != null ? r.forwardPe.toFixed(1) : "—"}
                   </td>
-                  <td className="px-2 py-2 text-right"><NumCell value={r.ttmEPS} onChange={(v) => updateStock(idx, { ttmEPS: v })} decimals={2} width="w-20" /></td>
+                  <td className="px-2 py-2 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      {r.epsCurated && (
+                        <span
+                          title="No provider EPS for this ticker — value is operator-maintained. Refresh updates price only and leaves the Updated date alone."
+                          className="text-[9px] uppercase tracking-wider font-mono px-1 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300">
+                          curated
+                        </span>
+                      )}
+                      <NumCell value={r.ttmEPS} onChange={(v) => updateStock(idx, { ttmEPS: v, updated: todayShort() })} decimals={2} width="w-20" />
+                    </div>
+                  </td>
                   <td className="px-2 py-2 text-right tabular-nums font-mono text-xs text-zinc-300">
                     {r.forwardEps != null ? r.forwardEps.toFixed(2) : "—"}
                   </td>
-                  <td className="px-2 py-2 text-right"><NumCell value={r.growth} onChange={(v) => updateStock(idx, { growth: v })} decimals={0} suffix="%" width="w-16" /></td>
+                  <td className="px-2 py-2 text-right"><NumCell value={r.growth} onChange={(v) => updateStock(idx, { growth: v, updated: todayShort() })} decimals={0} suffix="%" width="w-16" /></td>
                   <td className="px-2 py-2 text-right tabular-nums font-mono text-xs text-zinc-300">{fmtMoney(r.iv)}</td>
                   <td className="px-2 py-2 text-right"><NumCell value={r.currentPrice} onChange={(v) => updateStock(idx, { currentPrice: v })} decimals={2} width="w-24" /></td>
                   <td className="px-2 py-2 text-right">

@@ -209,3 +209,20 @@ export function suggestScore(category, fundamentals, pctIV, globals, overrides =
 
   return { suggested, breakdown };
 }
+
+// --- Additive: server-side persistence needs a flat index of every stored
+// rubric factor (quant + judgment) across all categories, derived from
+// RUBRIC_DEF rather than hard-coded, so the two never drift apart.
+// `pctIV` is intentionally excluded — it is a computed valuation input
+// (price / IV at scoring time), not a fetchable or operator-set factor, and
+// it lives outside `quantitativeFields` for exactly that reason.
+export const CATEGORY_KEYS = Object.keys(RUBRIC_DEF);
+
+export const FACTOR_INDEX = Object.fromEntries(
+  CATEGORY_KEYS.flatMap((category) => {
+    const def = RUBRIC_DEF[category];
+    const quant = def.quantitativeFields.map((field) => [field.key, { category, kind: "quant", format: field.format }]);
+    const judgment = def.qualitativeFields.map((field) => [field.key, { category, kind: "judgment", options: field.options }]);
+    return [...quant, ...judgment];
+  })
+);

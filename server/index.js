@@ -6,7 +6,9 @@ import YahooFinance from "yahoo-finance2";
 import { fileURLToPath } from "url";
 import { DEFAULT_GLOBALS, SEED_STOCKS } from "../src/lib/defaultData.js";
 import { calcIV, calcPctIV, calcScore, allocationSignals } from "../src/lib/valuation.js";
+import { CATEGORY_KEYS, FACTOR_INDEX } from "../src/lib/rubric.js";
 import { fetchFundamentalsBatch, finnhubConfigured } from "./lib/finnhub.js";
+import { computeScores, coerceFactorValue } from "./lib/scoring.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -15,11 +17,11 @@ const yahooFinance = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 const defaultDbDir = process.env.NODE_ENV === "production" ? "/data" : path.join(__dirname, "..", ".data");
 const DB_PATH = process.env.SQLITE_DB_PATH || path.join(defaultDbDir, "fair-value.sqlite");
 
-const STOCK_FIELDS = ["ticker", "ttmEPS", "growth", "currentPrice", "updated", "valuation", "growthScore", "moat", "executionRisk", "economy", "epsPinned"];
+const STOCK_FIELDS = ["ticker", "ttmEPS", "growth", "currentPrice", "updated", "valuation", "growthScore", "moat", "executionRisk", "economy", "epsPinned", "pinnedCategories"];
 const STOCK_FIELD_SET = new Set(STOCK_FIELDS);
-// epsPinned is optional everywhere (defaults to 0): operator/import curation
-// flag, not part of the core row contract.
-const REQUIRED_STOCK_FIELDS = STOCK_FIELDS.filter((field) => field !== "epsPinned");
+// epsPinned and pinnedCategories are optional everywhere (default to
+// 0 / "unpinned"): curation flags, not part of the core row contract.
+const REQUIRED_STOCK_FIELDS = STOCK_FIELDS.filter((field) => field !== "epsPinned" && field !== "pinnedCategories");
 const NUMERIC_STOCK_FIELDS = new Set(["ttmEPS", "growth", "currentPrice", "valuation", "growthScore", "moat", "executionRisk", "economy"]);
 const GLOBAL_FIELDS = ["peNoGrowth", "g", "avgYieldAAA", "bondYield"];
 const GLOBAL_FIELD_SET = new Set(GLOBAL_FIELDS);
@@ -36,6 +38,7 @@ const stockColumnByField = {
   executionRisk: "execution_risk",
   economy: "economy",
   epsPinned: "eps_pinned",
+  pinnedCategories: "pinned_categories",
 };
 
 const globalColumnByField = {
@@ -85,6 +88,24 @@ db.exec(`
     data TEXT NOT NULL,
     PRIMARY KEY (run_id, ticker)
   );
+
+  CREATE TABLE IF NOT EXISTS stock_factors (
+    ticker       TEXT NOT NULL,
+    factor_key   TEXT NOT NULL,
+    category     TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    manual_value TEXT,
+    fetched_value TEXT,
+    fetched_at   TEXT,
+    updated      TEXT,
+    PRIMARY KEY (ticker, factor_key)
+  );
+
+  CREATE TABLE IF NOT EXISTS fundamentals_cache (
+    ticker     TEXT PRIMARY KEY,
+    fetched_at TEXT NOT NULL,
+    data       TEXT NOT NULL
+  );
 `);
 
 // Migration: eps_pinned marks rows whose ttmEPS is operator/sheet-curated on a
@@ -94,20 +115,35 @@ if (!db.prepare("PRAGMA table_info(stocks)").all().some((c) => c.name === "eps_p
   db.exec("ALTER TABLE stocks ADD COLUMN eps_pinned INTEGER NOT NULL DEFAULT 0");
 }
 
+// Migration: pinned_categories marks which of the five score columns are
+// operator-curated vs. recomputed live from stock_factors. Rows that predate
+// this column have no factors on file at all -- their scores are entirely
+// curated (sheet import / manual entry) -- so on first run we pin every
+// category for every existing row. Without this, the very next recompute
+// (e.g. the next /api/quotes refresh) would silently overwrite every
+// pre-existing score with a cold-start computed value.
+if (!db.prepare("PRAGMA table_info(stocks)").all().some((c) => c.name === "pinned_categories")) {
+  db.exec("ALTER TABLE stocks ADD COLUMN pinned_categories TEXT NOT NULL DEFAULT ''");
+  db.prepare("UPDATE stocks SET pinned_categories = ?").run(CATEGORY_KEYS.join(","));
+}
+
 const insertStock = db.prepare(`
   INSERT INTO stocks (
     ticker, ttm_eps, growth, current_price, updated, valuation,
-    growth_score, moat, execution_risk, economy, eps_pinned, position
+    growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories, position
   ) VALUES (
     @ticker, @ttmEPS, @growth, @currentPrice, @updated, @valuation,
-    @growthScore, @moat, @executionRisk, @economy, @epsPinned, @position
+    @growthScore, @moat, @executionRisk, @economy, @epsPinned, @pinnedCategories, @position
   )
 `);
 
 const seedDatabase = db.transaction(() => {
   const stockCount = db.prepare("SELECT COUNT(*) AS count FROM stocks").get().count;
   if (stockCount === 0) {
-    SEED_STOCKS.forEach((stock, index) => insertStock.run({ epsPinned: 0, ...stock, position: index }));
+    // Seed data is curated the same way sheet-imported rows are (see the
+    // pinned_categories migration above) -- pin everything so a stray
+    // /api/quotes refresh on a fresh install can't recompute over it.
+    SEED_STOCKS.forEach((stock, index) => insertStock.run({ epsPinned: 0, pinnedCategories: CATEGORY_KEYS.join(","), ...stock, position: index }));
   }
 
   const globalCount = db.prepare("SELECT COUNT(*) AS count FROM globals").get().count;
@@ -159,6 +195,20 @@ function assertKnownFields(payload, allowedFields) {
   if (unknown.length > 0) throw apiError(400, `unknown field(s): ${unknown.join(", ")}`);
 }
 
+// Canonical (RUBRIC_DEF) order, deduped -- stable storage/display regardless
+// of the order the client sent them in.
+function normalizePinnedCategories(value) {
+  if (!Array.isArray(value)) throw apiError(400, "pinnedCategories must be an array of category keys");
+  const seen = new Set();
+  for (const entry of value) {
+    if (typeof entry !== "string" || !CATEGORY_KEYS.includes(entry)) {
+      throw apiError(400, `pinnedCategories: unknown category "${entry}"`);
+    }
+    seen.add(entry);
+  }
+  return CATEGORY_KEYS.filter((category) => seen.has(category));
+}
+
 function normalizeStockPayload(payload, { partial = false } = {}) {
   if (!isPlainObject(payload)) throw apiError(400, "request body must be a JSON object");
   assertKnownFields(payload, STOCK_FIELD_SET);
@@ -178,6 +228,9 @@ function normalizeStockPayload(payload, { partial = false } = {}) {
     if (payload.epsPinned === true || payload.epsPinned === 1) stock.epsPinned = 1;
     else if (payload.epsPinned === false || payload.epsPinned === 0) stock.epsPinned = 0;
     else throw apiError(400, "epsPinned must be a boolean");
+  }
+  if (payload.pinnedCategories != null) {
+    stock.pinnedCategories = normalizePinnedCategories(payload.pinnedCategories).join(",");
   }
   for (const field of NUMERIC_STOCK_FIELDS) {
     if (payload[field] != null) stock[field] = normalizeFiniteNumber(payload[field], field);
@@ -212,6 +265,7 @@ function stockFromRow(row) {
     executionRisk: row.execution_risk,
     economy: row.economy,
     epsPinned: Boolean(row.eps_pinned),
+    pinnedCategories: row.pinned_categories ? row.pinned_categories.split(",").filter(Boolean) : [],
   };
 }
 
@@ -227,7 +281,7 @@ function globalsFromRow(row) {
 function getStocks() {
   return db.prepare(`
     SELECT ticker, ttm_eps, growth, current_price, updated, valuation,
-      growth_score, moat, execution_risk, economy, eps_pinned
+      growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories
     FROM stocks
     ORDER BY position ASC, ticker ASC
   `).all().map(stockFromRow);
@@ -245,11 +299,117 @@ function getGlobals() {
 function getStockByTicker(ticker) {
   const row = db.prepare(`
     SELECT ticker, ttm_eps, growth, current_price, updated, valuation,
-      growth_score, moat, execution_risk, economy, eps_pinned
+      growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories
     FROM stocks
     WHERE ticker = ?
   `).get(ticker);
   return row ? stockFromRow(row) : null;
+}
+
+const upsertFactorManual = db.prepare(`
+  INSERT INTO stock_factors (ticker, factor_key, category, kind, manual_value, updated)
+  VALUES (@ticker, @factorKey, @category, @kind, @manualValue, @updated)
+  ON CONFLICT (ticker, factor_key) DO UPDATE SET manual_value = excluded.manual_value, updated = excluded.updated
+`);
+
+// Only touches the fetched_value/fetched_at columns -- never clobbers an
+// operator's manual_value when a provider refresh runs.
+const upsertFactorFetched = db.prepare(`
+  INSERT INTO stock_factors (ticker, factor_key, category, kind, fetched_value, fetched_at, updated)
+  VALUES (@ticker, @factorKey, @category, @kind, @fetchedValue, @fetchedAt, @updated)
+  ON CONFLICT (ticker, factor_key) DO UPDATE SET fetched_value = excluded.fetched_value, fetched_at = excluded.fetched_at, updated = excluded.updated
+`);
+
+const upsertFundamentalsCache = db.prepare(`
+  INSERT INTO fundamentals_cache (ticker, fetched_at, data)
+  VALUES (@ticker, @fetchedAt, @data)
+  ON CONFLICT (ticker) DO UPDATE SET fetched_at = excluded.fetched_at, data = excluded.data
+`);
+
+function getFundamentalsCache(ticker) {
+  const row = db.prepare("SELECT data FROM fundamentals_cache WHERE ticker = ?").get(ticker);
+  return row ? JSON.parse(row.data) : null;
+}
+
+// Full factor map for API responses -- every known factor key (from
+// FACTOR_INDEX, not hard-coded), filled in with nulls where no row exists yet
+// so the shape is stable whether or not the ticker has ever been scored.
+function getFactorsMapForTicker(ticker) {
+  const rows = db.prepare("SELECT factor_key, manual_value, fetched_value, fetched_at FROM stock_factors WHERE ticker = ?").all(ticker);
+  const byKey = new Map(rows.map((row) => [row.factor_key, row]));
+  const map = {};
+  for (const key of Object.keys(FACTOR_INDEX)) {
+    const row = byKey.get(key);
+    map[key] = {
+      manual: row ? coerceFactorValue(key, row.manual_value) : null,
+      fetched: row ? coerceFactorValue(key, row.fetched_value) : null,
+      fetchedAt: row?.fetched_at ?? null,
+    };
+  }
+  return map;
+}
+
+// Pure -- reads only, no writes. Used both by GET /api/data (which must not
+// mutate on a read) and by recomputeScoresForTicker (which decides what to
+// write based on this).
+function computeScoresForTicker(ticker) {
+  const stock = getStockByTicker(ticker);
+  if (!stock) return null;
+  const globals = getGlobals();
+  const factorRows = db.prepare("SELECT factor_key, manual_value FROM stock_factors WHERE ticker = ?").all(ticker);
+  const factors = Object.fromEntries(factorRows.map((row) => [row.factor_key, row.manual_value]));
+  const fundamentals = getFundamentalsCache(ticker);
+  return computeScores(stock, factors, fundamentals, globals);
+}
+
+// The effective-score rule: pinned categories keep whatever is already in the
+// stocks row untouched; unpinned categories get overwritten with the fresh
+// computed value. Called whenever factors change or fundamentals refresh.
+function recomputeScoresForTicker(ticker) {
+  const stock = getStockByTicker(ticker);
+  if (!stock) return null;
+  const computed = computeScoresForTicker(ticker);
+  const pinned = new Set(stock.pinnedCategories);
+
+  const patch = {};
+  for (const category of CATEGORY_KEYS) {
+    if (!pinned.has(category)) patch[stockColumnByField[category]] = computed[category];
+  }
+  if (Object.keys(patch).length > 0) {
+    const assignments = Object.keys(patch).map((column) => `${column} = @${column}`);
+    db.prepare(`UPDATE stocks SET ${assignments.join(", ")} WHERE ticker = @ticker`).run({ ...patch, ticker });
+  }
+  return { computed, stock: getStockByTicker(ticker) };
+}
+
+function normalizeFactorPatch(payload) {
+  if (!isPlainObject(payload)) throw apiError(400, "request body must be a JSON object");
+  const unknown = Object.keys(payload).filter((key) => !FACTOR_INDEX[key]);
+  if (unknown.length > 0) throw apiError(400, `unknown factor key(s): ${unknown.join(", ")}`);
+
+  const patch = {};
+  for (const [key, rawValue] of Object.entries(payload)) {
+    const info = FACTOR_INDEX[key];
+    if (rawValue == null) {
+      patch[key] = null; // explicit clear of the override
+      continue;
+    }
+    if (info.kind === "judgment") {
+      const idx = Number(rawValue);
+      const optionCount = info.options?.length || 0;
+      if (!Number.isInteger(idx) || idx < 0 || idx >= optionCount) {
+        throw apiError(400, `${key} must be an integer option index between 0 and ${optionCount - 1}`);
+      }
+      patch[key] = String(idx);
+    } else if (info.format === "text") {
+      if (typeof rawValue !== "string") throw apiError(400, `${key} must be a string`);
+      patch[key] = rawValue.trim();
+    } else {
+      patch[key] = String(normalizeFiniteNumber(rawValue, key));
+    }
+  }
+  if (Object.keys(patch).length === 0) throw apiError(400, "at least one factor is required");
+  return patch;
 }
 
 function handleRoute(fn) {
@@ -299,7 +459,14 @@ function emptyFundamentals() {
 }
 
 app.get("/api/data", handleRoute((req, res) => {
-  res.json({ stocks: getStocks(), globals: getGlobals() });
+  const stocks = getStocks();
+  const factors = {};
+  const computed = {};
+  for (const stock of stocks) {
+    factors[stock.ticker] = getFactorsMapForTicker(stock.ticker);
+    computed[stock.ticker] = computeScoresForTicker(stock.ticker);
+  }
+  res.json({ stocks, globals: getGlobals(), factors, computed });
 }));
 
 app.post("/api/stocks", handleRoute((req, res) => {
@@ -307,7 +474,9 @@ app.post("/api/stocks", handleRoute((req, res) => {
   if (getStockByTicker(stock.ticker)) throw apiError(409, `stock ${stock.ticker} already exists`);
 
   const nextPosition = db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS position FROM stocks").get().position;
-  insertStock.run({ epsPinned: 0, ...stock, position: nextPosition });
+  // New stocks default unpinned: no curated score to protect, so the model
+  // computes them from factors as soon as any are supplied.
+  insertStock.run({ epsPinned: 0, pinnedCategories: "", ...stock, position: nextPosition });
   res.status(201).json(getStockByTicker(stock.ticker));
 }));
 
@@ -332,7 +501,31 @@ app.put("/api/stocks/:ticker", handleRoute((req, res) => {
 
   const assignments = Object.keys(patch).map((field) => `${stockColumnByField[field]} = @${field}`);
   db.prepare(`UPDATE stocks SET ${assignments.join(", ")} WHERE ticker = @currentTicker`).run({ ...patch, currentTicker });
+
+  // Pinning/unpinning changes which columns are "live"; recompute immediately
+  // so a newly-unpinned category doesn't sit stale until the next factor edit
+  // or quotes refresh happens to touch it.
+  if (Object.prototype.hasOwnProperty.call(patch, "pinnedCategories")) {
+    recomputeScoresForTicker(nextTicker);
+  }
   res.json(getStockByTicker(nextTicker));
+}));
+
+app.put("/api/factors/:ticker", handleRoute((req, res) => {
+  const ticker = normalizeTicker(req.params.ticker, "ticker parameter");
+  if (!getStockByTicker(ticker)) throw apiError(404, `stock ${ticker} not found`);
+  const patch = normalizeFactorPatch(req.body);
+  const now = new Date().toISOString();
+
+  const result = db.transaction(() => {
+    for (const [key, manualValue] of Object.entries(patch)) {
+      const info = FACTOR_INDEX[key];
+      upsertFactorManual.run({ ticker, factorKey: key, category: info.category, kind: info.kind, manualValue, updated: now });
+    }
+    return recomputeScoresForTicker(ticker);
+  })();
+
+  res.json({ factors: getFactorsMapForTicker(ticker), computed: result.computed, stock: result.stock });
 }));
 
 app.delete("/api/stocks/:ticker", handleRoute((req, res) => {
@@ -457,6 +650,36 @@ async function buildQuoteMap(normalized) {
   return result;
 }
 
+// Persists the provider payload for every ticker returned (even ones not in
+// the stocks table -- harmless fundamentals cache warm-up), then for tickers
+// the app actually tracks: mirrors quant values into stock_factors as
+// fetched_value/fetched_at and recomputes unpinned scores. Runs as one
+// transaction so a mid-batch failure can't leave the cache and factor rows
+// out of sync.
+function persistQuotesAndRecompute(tickers, quoteMap) {
+  const now = new Date().toISOString();
+  const trackedTickers = new Set(getStocks().map((s) => s.ticker));
+  const toRecompute = [];
+
+  db.transaction(() => {
+    for (const ticker of tickers) {
+      const quote = quoteMap[ticker];
+      if (!quote) continue;
+      upsertFundamentalsCache.run({ ticker, fetchedAt: now, data: JSON.stringify(quote) });
+      if (!trackedTickers.has(ticker)) continue;
+
+      for (const [key, info] of Object.entries(FACTOR_INDEX)) {
+        if (info.kind !== "quant") continue;
+        const value = key === "epsGrowthRate" ? quote.epsGrowthRate : quote.fundamentals?.[key];
+        if (value == null) continue;
+        upsertFactorFetched.run({ ticker, factorKey: key, category: info.category, kind: info.kind, fetchedValue: String(value), fetchedAt: now, updated: now });
+      }
+      toRecompute.push(ticker);
+    }
+    for (const ticker of toRecompute) recomputeScoresForTicker(ticker);
+  })();
+}
+
 app.post("/api/quotes", async (req, res) => {
   const { tickers } = req.body || {};
   if (!Array.isArray(tickers) || tickers.length === 0) {
@@ -465,13 +688,15 @@ app.post("/api/quotes", async (req, res) => {
 
   try {
     const normalized = [...new Set(tickers.map((raw) => String(raw || "").trim().toUpperCase()).filter(Boolean))];
-    res.json(await buildQuoteMap(normalized));
+    const quoteMap = await buildQuoteMap(normalized);
+    persistQuotesAndRecompute(normalized, quoteMap);
+    res.json(quoteMap);
   } catch (error) {
     res.status(500).json({ error: error?.message || "internal server error" });
   }
 });
 
-const SNAPSHOT_SCHEMA_VERSION = 1;
+const SNAPSHOT_SCHEMA_VERSION = 2; // v2 adds per-ticker factors + pinnedCategories (rubric persistence, S2)
 
 const insertSnapshot = db.transaction((payload) => {
   const runId = db.prepare(
@@ -507,6 +732,7 @@ app.post("/api/snapshot", async (req, res) => {
         pctIV,
         score,
         signals: allocationSignals(s, iv, pctIV, score),
+        factors: getFactorsMapForTicker(s.ticker),
         quote: quote ? {
           trailingEps: quote.trailingEps,
           forwardEps: quote.forwardEps,

@@ -118,6 +118,84 @@ could not satisfy.
 Apply is transactional and takes a snapshot first, so any import is
 recoverable from `/api/snapshots`.
 
+## Field precedence: who owns what
+
+Three sources write to a ticker, and each owns a different slice. Confusing
+them is how curated values get silently destroyed.
+
+| Source | Owns | Never touches |
+|---|---|---|
+| **IWB workbook** | TTM EPS, growth %, the five category scores | quantitative factors, judgment factors |
+| **Refresh (providers)** | quantitative factor `fetched_value` | judgment factors, scores, pinned EPS |
+| **Operator** | anything — judgment factors are *exclusively* theirs | — |
+
+**New tickers:** the workbook is the default state. Created fully pinned with
+Brandon's scores, EPS and growth; refresh then maintains their quantitative
+factors. Judgment factors start unassessed and stay that way until the
+operator fills them in — nothing infers them.
+
+**Judgment fields need an explicit "not assessed" state.** Today the worksheet
+pre-selects the middle option (`ScoringWorksheet.jsx`: `Math.floor((len-1)/2)`),
+which is harmless while nothing persists but becomes a lie the moment it does —
+a saved "Average" the operator never actually chose, contributing real weight
+to the score. Add `— not assessed —` as the default option, mapping to `null`
+so `suggestScore` falls through to its neutral weight, and surface a per-row
+completeness indicator. "Manual assessment required" is only enforceable if
+unassessed is visibly distinct from assessed.
+
+## Re-importing a newer workbook: three-way merge
+
+Brandon revises the sheet continuously, and the operator edits scores in the
+app between imports. A straight overwrite would silently discard the
+operator's work; skipping changed rows would silently discard Brandon's. The
+answer is the one version control already settled on — a **three-way merge**.
+
+Record what each import wrote, per ticker per field:
+
+```sql
+CREATE TABLE import_baseline (
+  ticker TEXT NOT NULL,
+  field  TEXT NOT NULL,        -- ttmEPS | growth | valuation | growthScore | moat | executionRisk | economy
+  value  TEXT NOT NULL,
+  imported_at TEXT NOT NULL,
+  source TEXT,                 -- workbook filename, e.g. "260726 IWB STOCK SHEET 4.0.xlsx"
+  PRIMARY KEY (ticker, field)
+);
+```
+
+That baseline is the common ancestor. For every field the preview then
+compares three values — `base` (last import), `mine` (current app), `theirs`
+(new workbook) — and classifies:
+
+| base vs mine | base vs theirs | outcome |
+|---|---|---|
+| same | same | **unchanged** — no-op, not shown |
+| same | differs | **clean update** — auto-applied, listed for information |
+| differs | same | **mine stands** — Brandon didn't revisit it; no action |
+| differs | differs | **conflict** — requires an explicit decision |
+
+Only the fourth row demands attention, and in practice it will be a handful of
+fields rather than a wall. Each conflict is presented with all three values and
+their dates:
+
+> **MU · moat** — you set **16** on 7/26 · last import **15** · Brandon now **17**
+> `[ keep mine ]  [ take Brandon's ]`
+
+Default is **keep mine**: the operator's deliberate edit outranks an
+unreviewed bulk update. Nothing overwrites a divergent field without a click.
+
+**Released categories are treated as a decision, not a gap.** If the operator
+unpinned a category to let their own model drive it, an incoming workbook
+score does not silently re-pin it — that surfaces as its own prompt
+("you released `moat` to the model; Brandon now says 17 — re-pin?").
+
+**Bootstrapping.** Today's import (issue #28) predates the baseline table, so
+seed it from the workbook that produced it —
+`data/sheets/260726 IWB STOCK SHEET 4.0.xlsx` — which is safe precisely
+because that import was verified idempotent. Without the seed, the next
+upload would flag every field the operator has touched since as a false
+conflict.
+
 ## Also in scope
 
 - **Economy** stays per-row — the rubric genuinely scores beta, sector, and

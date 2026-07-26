@@ -164,3 +164,7 @@ Thumbs.db
 # Brandon's IWB stock sheet exports — community/paid content, repo is public.
 # Stored locally for the import tooling; never commit.
 /data/sheets/
+
+# Production data exports taken before destructive changes. These are full
+# dumps of the live watchlist, scores, and factor values — repo is public.
+/backups/

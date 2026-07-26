@@ -453,6 +453,28 @@ const upsertBaselineField = db.prepare(`
   ON CONFLICT (ticker, field) DO UPDATE SET value = excluded.value, imported_at = excluded.imported_at, source = excluded.source
 `);
 
+// stock_factors, fundamentals_cache, and import_baseline are all keyed by
+// ticker with no foreign key back to stocks, so SQLite will not cascade for
+// us: every path that removes or renames a symbol has to clean them up by
+// hand. Skipping this strands rows that a later re-add of the same symbol
+// silently adopts as current data.
+const TICKER_SCOPED_TABLES = ["stock_factors", "fundamentals_cache", "import_baseline"];
+
+const deleteTickerRows = TICKER_SCOPED_TABLES.map((table) =>
+  db.prepare(`DELETE FROM ${table} WHERE ticker = ?`)
+);
+
+const renameTickerRows = TICKER_SCOPED_TABLES.map((table) =>
+  db.prepare(`UPDATE ${table} SET ticker = @nextTicker WHERE ticker = @currentTicker`)
+);
+
+// Each table keys on ticker, so renaming onto a symbol that still has orphan
+// rows would hit a uniqueness conflict; clear the destination first.
+function moveTickerScopedRows(currentTicker, nextTicker) {
+  for (const stmt of deleteTickerRows) stmt.run(nextTicker);
+  for (const stmt of renameTickerRows) stmt.run({ currentTicker, nextTicker });
+}
+
 function getFundamentalsCache(ticker) {
   const row = db.prepare("SELECT data FROM fundamentals_cache WHERE ticker = ?").get(ticker);
   return row ? JSON.parse(row.data) : null;
@@ -668,14 +690,23 @@ app.put("/api/stocks/:ticker", handleRoute((req, res) => {
   }
 
   const assignments = Object.keys(patch).map((field) => `${stockColumnByField[field]} = @${field}`);
-  db.prepare(`UPDATE stocks SET ${assignments.join(", ")} WHERE ticker = @currentTicker`).run({ ...patch, currentTicker });
+  db.transaction(() => {
+    db.prepare(`UPDATE stocks SET ${assignments.join(", ")} WHERE ticker = @currentTicker`).run({ ...patch, currentTicker });
 
-  // Pinning/unpinning changes which columns are "live"; recompute immediately
-  // so a newly-unpinned category doesn't sit stale until the next factor edit
-  // or quotes refresh happens to touch it.
-  if (Object.prototype.hasOwnProperty.call(patch, "pinnedCategories")) {
-    recomputeScoresForTicker(nextTicker);
-  }
+    // A rename has to carry the ticker's factors and cached fundamentals with
+    // it, or the renamed stock loses its whole scoring history to orphans
+    // sitting under the old symbol.
+    if (nextTicker !== currentTicker) {
+      moveTickerScopedRows(currentTicker, nextTicker);
+    }
+
+    // Pinning/unpinning changes which columns are "live"; recompute immediately
+    // so a newly-unpinned category doesn't sit stale until the next factor edit
+    // or quotes refresh happens to touch it.
+    if (Object.prototype.hasOwnProperty.call(patch, "pinnedCategories")) {
+      recomputeScoresForTicker(nextTicker);
+    }
+  })();
   res.json(getStockByTicker(nextTicker));
 }));
 
@@ -698,8 +729,13 @@ app.put("/api/factors/:ticker", handleRoute((req, res) => {
 
 app.delete("/api/stocks/:ticker", handleRoute((req, res) => {
   const ticker = normalizeTicker(req.params.ticker, "ticker parameter");
-  const result = db.prepare("DELETE FROM stocks WHERE ticker = ?").run(ticker);
-  if (result.changes === 0) throw apiError(404, `stock ${ticker} not found`);
+  const removed = db.transaction(() => {
+    const result = db.prepare("DELETE FROM stocks WHERE ticker = ?").run(ticker);
+    if (result.changes === 0) return false;
+    for (const stmt of deleteTickerRows) stmt.run(ticker);
+    return true;
+  })();
+  if (!removed) throw apiError(404, `stock ${ticker} not found`);
   res.status(204).end();
 }));
 

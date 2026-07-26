@@ -54,6 +54,72 @@ export const SCORE_WEIGHTS = {
   },
 };
 
+// Human-readable counterpart to SCORE_WEIGHTS and suggestScore. DocsPanel
+// renders this directly, while tests verify that every declared method maps to
+// a live weighted component. Scores below are normalized factor scores before
+// their category weight and category maximum are applied.
+export const SCORECARD_METHODOLOGY = {
+  valuation: {
+    calculation: "Round(20 × weighted average of the six factor scores).",
+    defaultBehavior: "If a provider metric or % of intrinsic value is unavailable, that factor receives the neutral 55% score; its weight is not redistributed.",
+    factors: {
+      pctIV: { calculation: "Current Price ÷ Intrinsic Value × 100. <70% = 100%; 70–90% = 80%; 90–110% = 60%; 110–130% = 35%; >130% = 10%.", source: "Derived from the Intrinsic Value formula; read-only." },
+      trailingPE: { calculation: "<12 = 100%; 12–15 = 80%; 15–20 = 60%; 20–25 = 35%; >25 = 10%.", source: "Provider TTM P/E; a manual factor override replaces it." },
+      forwardPE: { calculation: "<12 = 100%; 12–15 = 80%; 15–20 = 60%; 20–25 = 35%; >25 = 10%.", source: "Provider consensus forward P/E; a manual factor override replaces it." },
+      priceToBook: { calculation: "<1.2 = 100%; 1.2–1.5 = 80%; 1.5–3 = 60%; 3–5 = 35%; >5 = 10%.", source: "Provider price-to-book; a manual factor override replaces it." },
+      debtToEquity: { calculation: "<0.5 = 100%; 0.5–1 = 80%; 1–1.5 = 60%; 1.5–2 = 35%; >2 = 10%.", source: "Provider debt-to-equity; a manual factor override replaces it." },
+      currentRatio: { calculation: ">2 = 100%; 1.5–2 = 80%; 1–1.5 = 60%; 0.5–1 = 35%; <0.5 = 10%.", source: "Provider current ratio; a manual factor override replaces it." },
+    },
+  },
+  growthScore: {
+    calculation: "Round(20 × weighted average of the six factor scores).",
+    defaultBehavior: "Missing provider values or an unassessed judgment receive the neutral 55% score, except for the two seeded conservative judgments noted below.",
+    factors: {
+      epsGrowthRate: { calculation: ">20% = 100%; 15–20% = 85%; 10–15% = 65%; 5–10% = 40%; ≤5% = 15%.", source: "Provider TTM EPS growth YoY; not the IV Growth Assumption." },
+      revenueGrowth: { calculation: ">20% = 100%; 15–20% = 85%; 10–15% = 65%; 5–10% = 40%; ≤5% = 15%.", source: "Provider TTM revenue growth YoY." },
+      freeCashflow: { calculation: "Positive free cash flow = 90%; zero or negative = 10%.", source: "Provider free cash flow." },
+      debtVsCash: { calculation: "Total Debt ÷ Total Cash: <0.5 = 100%; 0.5–1 = 80%; 1–2 = 55%; 2–4 = 30%; >4 = 10%. Debt >0 with zero cash is 10%; both zero is 100%.", source: "Joint provider inputs: Total Debt and Total Cash; either can be manually overridden." },
+      growthConsistency: { calculation: "10+ years no deficits = 100%; 7–9 = 80%; 5–6 = 60%; 3–4 or a deficit = 30%; under 3/chronic deficits = 10%.", source: "Operator judgment from annual history; unassessed = neutral 55%." },
+      growthFundingQuality: { calculation: "Entirely organic/FCF-funded = 100%; mostly organic = 80%; mixed = 60%; debt/acquisition-driven = 35%; dilution/engineering = 10%.", source: "Operator judgment. New or migrated rows default to ‘Mostly organic with modest debt’ (80%) until changed." },
+    },
+  },
+  moat: {
+    calculation: "Round(20 × weighted average of the seven factor scores).",
+    defaultBehavior: "Missing provider values or an unassessed judgment receive the neutral 55% score, except for the seeded moat-trajectory default.",
+    factors: {
+      returnOnEquity: { calculation: ">25% = 100%; 20–25% = 85%; 15–20% = 65%; 10–15% = 40%; <10% = 15%.", source: "Provider ROE; a manual factor override replaces it." },
+      grossMargins: { calculation: ">60% = 100%; 40–60% = 85%; 25–40% = 65%; 10–25% = 40%; <10% = 15%.", source: "Provider gross margin; a manual factor override replaces it." },
+      operatingMargins: { calculation: ">30% = 100%; 20–30% = 85%; 10–20% = 65%; 5–10% = 40%; <5% = 15%.", source: "Provider operating margin; a manual factor override replaces it." },
+      profitMargins: { calculation: ">25% = 100%; 15–25% = 85%; 10–15% = 65%; 5–10% = 40%; <5% = 15%.", source: "Provider net profit margin; a manual factor override replaces it." },
+      returnOnAssets: { calculation: ">15% = 100%; 10–15% = 85%; 7–10% = 65%; 3–7% = 40%; <3% = 15%.", source: "Provider ROA; a manual factor override replaces it." },
+      moatType: { calculation: "Brand = 100%; network = 90%; cost advantage = 85%; switching costs = 80%; efficient scale = 70%; patent/license = 75%; no moat = 15%.", source: "Operator judgment; unassessed = neutral 55%." },
+      moatDurability: { calculation: "Widening = 100%; stable = 85%; narrowing slowly = 60%; narrowing rapidly = 30%; broken = 5%.", source: "Operator judgment. New or migrated rows default to ‘Stable — no material erosion visible’ (85%) until changed." },
+    },
+  },
+  executionRisk: {
+    calculation: "Round(10 × weighted average of the five factor scores).",
+    defaultBehavior: "Missing provider values or unassessed operator judgments receive the neutral 55% score.",
+    factors: {
+      managementQuality: { calculation: "Exceptional = 100%; good = 80%; average = 60%; below average = 35%; poor = 10%.", source: "Operator judgment; unassessed = neutral 55%." },
+      capitalAllocation: { calculation: "Outstanding = 100%; good = 80%; mixed = 60%; poor = 35%; destructive = 10%.", source: "Operator judgment; unassessed = neutral 55%." },
+      insidersPercentHeld: { calculation: ">20% = 100%; 10–20% = 80%; 5–10% = 60%; 1–5% = 40%; <1% = 20%.", source: "Provider insider ownership; a manual factor override replaces it." },
+      institutionsPercentHeld: { calculation: "35–75% = 100%; 20–35% or >75–90% = 75%; >90% = 35%; <20% = 40%.", source: "Provider institutional ownership; a manual factor override replaces it." },
+      shortPercentOfFloat: { calculation: "<2% = 100%; 2–5% = 80%; 5–10% = 60%; 10–20% = 35%; >20% = 10%.", source: "Provider short interest; a manual factor override replaces it." },
+    },
+  },
+  economy: {
+    calculation: "Round(30 × weighted average of the five factor scores).",
+    defaultBehavior: "Missing provider values or unassessed operator judgments receive the neutral 55% score.",
+    factors: {
+      beta: { calculation: "<0.6 = 100%; 0.6–0.9 = 85%; 0.9–1.2 = 65%; 1.2–1.6 = 40%; >1.6 = 15%.", source: "Provider beta; a manual factor override replaces it." },
+      rateEnvironment: { calculation: "Falling = 100%; stable = 75%; rising = 45%; peak = 60%; uncertainty = 40%.", source: "Operator macro judgment; unassessed = neutral 55%." },
+      industryTailwind: { calculation: "Strong tailwind = 100%; mild tailwind = 80%; neutral = 60%; mild headwind = 35%; structural decline = 10%.", source: "Operator industry judgment; unassessed = neutral 55%." },
+      regulatoryRisk: { calculation: "Minimal = 100%; low = 80%; moderate = 60%; elevated = 35%; severe = 10%.", source: "Operator regulatory judgment; unassessed = neutral 55%." },
+      dividendYield: { calculation: ">3% = 100%; 1–3% = 75%; >0–1% = 50%; 0% = 40%.", source: "Provider dividend yield; a manual factor override replaces it." },
+    },
+  },
+};
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }

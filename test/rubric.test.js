@@ -5,6 +5,7 @@ import {
   DEFAULT_JUDGMENT_OVERRIDES,
   FACTOR_INDEX,
   RUBRIC_DEF,
+  SCORECARD_METHODOLOGY,
   SCORE_WEIGHTS,
   suggestScore,
 } from "../src/lib/rubric.js";
@@ -19,6 +20,24 @@ test("every category scoring weight sums to 1.0", () => {
   for (const category of CATEGORY_KEYS) {
     const total = Object.values(SCORE_WEIGHTS[category]).reduce((sum, weight) => sum + weight, 0);
     assert.ok(Math.abs(total - 1) < 1e-12, `${category} weights sum to ${total}`);
+  }
+});
+
+test("scorecard methodology documents every live weighted component", () => {
+  assert.deepEqual(Object.keys(SCORECARD_METHODOLOGY), CATEGORY_KEYS);
+  for (const category of CATEGORY_KEYS) {
+    const method = SCORECARD_METHODOLOGY[category];
+    assert.ok(method.calculation.length > 0, `${category} calculation is documented`);
+    assert.ok(method.defaultBehavior.length > 0, `${category} default behavior is documented`);
+    assert.deepEqual(
+      Object.keys(method.factors).sort(),
+      Object.keys(SCORE_WEIGHTS[category]).sort(),
+      `${category} methodology and live score weights drifted`
+    );
+    for (const factor of Object.values(method.factors)) {
+      assert.ok(factor.calculation.length > 0, "factor calculation is documented");
+      assert.ok(factor.source.length > 0, "factor source/default is documented");
+    }
   }
 });
 

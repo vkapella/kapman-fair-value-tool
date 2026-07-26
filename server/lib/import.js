@@ -1,7 +1,15 @@
 import { calcIV, calcPctIV } from "../../src/lib/valuation.js";
 import { CATEGORY_KEYS } from "../../src/lib/rubric.js";
+import { selectAutomaticValuationEps } from "./eps.js";
 
 const finiteOrNull = (value) => Number.isFinite(value) ? value : null;
+
+function automaticValuationEps(quote) {
+  return selectAutomaticValuationEps(
+    finiteOrNull(quote?.gaapTtmEps ?? quote?.trailingEps),
+    finiteOrNull(quote?.adjustedTtmEps)
+  ).value;
+}
 
 // Provider feeds do not supply the operator's forward 7–10 year growth
 // assumption. Starting at zero is deliberately conservative and, unlike
@@ -24,13 +32,19 @@ export function buildTickerPreview({ tickers, stocks, globals, quotes }) {
       continue;
     }
 
-    const ttmEPS = finiteOrNull(quote.trailingEps);
+    const valuationTtmEps = automaticValuationEps(quote);
     const growth = 0;
     adds.push({
       ticker,
       longName: quote.longName || null,
       quoteType: quote.quoteType || null,
-      ttmEPS,
+      // Legacy alias retained for callers that have not adopted the explicit
+      // valuation field yet.
+      ttmEPS: valuationTtmEps,
+      gaapTtmEps: finiteOrNull(quote.gaapTtmEps ?? quote.trailingEps),
+      adjustedTtmEps: finiteOrNull(quote.adjustedTtmEps),
+      valuationTtmEps,
+      valuationEpsBasis: "auto",
       growth,
       currentPrice,
       updated: new Date().toLocaleDateString("en-US", {
@@ -39,17 +53,17 @@ export function buildTickerPreview({ tickers, stocks, globals, quotes }) {
         day: "numeric",
         year: "2-digit",
       }),
-      pctIV: calcPctIV(currentPrice, calcIV(ttmEPS, growth, globals)),
+      pctIV: calcPctIV(currentPrice, calcIV(valuationTtmEps, growth, globals)),
       preChecked: true,
       sources: {
         currentPrice: "provider",
-        ttmEPS: ttmEPS == null ? "unavailable" : "provider",
+        ttmEPS: valuationTtmEps == null ? "unavailable" : "automatic lower positive provider EPS",
         growth: "operator",
         categories: "live model",
       },
       needsOperatorInput: ["growth", ...CATEGORY_KEYS],
       notes: [
-        ttmEPS == null && "provider has no usable TTM EPS; intrinsic value will remain unavailable",
+        valuationTtmEps == null && "provider has no usable TTM EPS; intrinsic value will remain unavailable",
         "forward growth starts at 0% until reviewed",
         "category scores start unpinned from live factors; review qualitative judgments",
       ].filter(Boolean),

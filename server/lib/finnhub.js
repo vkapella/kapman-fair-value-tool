@@ -1,6 +1,6 @@
-// Finnhub free-tier client for fundamentals. Primary provider for /api/quotes;
-// Yahoo back-fills only the fields the free tier lacks (ownership, short
-// interest, cash/debt/FCF dollar levels, forward EPS).
+// Finnhub free-tier client for fundamentals. Price is deliberately supplied by
+// Yahoo in server/index.js; a normal EPS refresh makes only metric + earnings
+// calls to Finnhub.
 const BASE_URL = "https://finnhub.io/api/v1";
 
 function apiKey() {
@@ -28,94 +28,102 @@ function num(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-// Finnhub reports percent-family metrics as percentages (roeTTM: 146.69) and
-// size metrics in millions; rubric.js expects fractions and absolute dollars.
 function fraction(value) {
   const n = num(value);
   return n == null ? null : n / 100;
 }
 
-function fromMillions(value) {
-  const n = num(value);
-  return n == null ? null : n * 1e6;
+function reportedQuarterKey(earning) {
+  // Finnhub currently supplies both period and date. A report can be revised
+  // or duplicated, so a fiscal-period identity is mandatory before it counts.
+  const key = earning?.period || earning?.date;
+  return typeof key === "string" && key.trim() ? key.trim() : null;
+}
+
+function reportTime(earning) {
+  const raw = earning?.period || earning?.date || "";
+  const timestamp = Date.parse(raw);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+// Finnhub's earnings endpoint labels the reported per-share figure `actual`.
+// This is intentionally not a non-GAAP inference: it is a separate adjusted
+// TTM series whose provenance remains visible to the operator.
+export function adjustedTtmFromEarnings(earnings) {
+  if (!Array.isArray(earnings)) {
+    return { value: null, reason: "earnings history unavailable", quarters: [] };
+  }
+  const latest = [...earnings]
+    .sort((a, b) => reportTime(b) - reportTime(a))
+    .slice(0, 4);
+  if (latest.length < 4) {
+    return {
+      value: null,
+      reason: `requires 4 reported quarters; found ${latest.length}`,
+      quarters: latest.map((q) => ({ period: reportedQuarterKey(q), actual: q?.actual ?? null })),
+    };
+  }
+  const periods = latest.map(reportedQuarterKey);
+  const actuals = latest.map((quarter) => num(quarter?.actual));
+  if (periods.some((period) => !period) || actuals.some((actual) => actual == null)) {
+    return { value: null, reason: "latest 4 reported quarters contain an invalid period or actual EPS", quarters: latest.map((q) => ({ period: reportedQuarterKey(q), actual: q?.actual ?? null })) };
+  }
+  if (new Set(periods).size !== periods.length) {
+    return { value: null, reason: "latest 4 reported quarters contain duplicate periods", quarters: latest.map((q) => ({ period: reportedQuarterKey(q), actual: q.actual })) };
+  }
+  const quarters = latest;
+  return {
+    value: quarters.reduce((sum, quarter) => sum + quarter.actual, 0),
+    reason: null,
+    quarters: quarters.map((q) => ({ period: reportedQuarterKey(q), actual: q.actual })),
+  };
 }
 
 export async function fetchTickerFundamentals(ticker) {
-  const [metricRes, profileRes, quoteRes] = await Promise.allSettled([
+  const [metricRes, earningsRes] = await Promise.allSettled([
     finnhubGet("/stock/metric", { symbol: ticker, metric: "all" }),
-    finnhubGet("/stock/profile2", { symbol: ticker }),
-    finnhubGet("/quote", { symbol: ticker }),
+    finnhubGet("/stock/earnings", { symbol: ticker }),
   ]);
-
   const metric = metricRes.status === "fulfilled" ? metricRes.value?.metric || {} : {};
-  const profile = profileRes.status === "fulfilled" ? profileRes.value || {} : {};
-  const quote = quoteRes.status === "fulfilled" ? quoteRes.value || {} : {};
-
-  const anyFulfilled = [metricRes, profileRes, quoteRes].some((r) => r.status === "fulfilled");
-  const errors = [metricRes, profileRes, quoteRes]
+  const earnings = earningsRes.status === "fulfilled" ? earningsRes.value : null;
+  const anyFulfilled = [metricRes, earningsRes].some((r) => r.status === "fulfilled");
+  const errors = [metricRes, earningsRes]
     .filter((r) => r.status === "rejected")
     .map((r) => r.reason?.message || String(r.reason));
   if (!anyFulfilled) return { ok: false, errors };
 
-  // Finnhub returns an all-zero quote object for unknown symbols.
-  const unknownQuote = num(quote.c) === 0 && num(quote.t) === 0;
-  const currentPrice = unknownQuote ? null : num(quote.c);
-
-  // metric.epsTTM is per-share of the PRIMARY listing — wrong currency for
-  // ADRs (TSM: TWD) and wrong share class for duals (BRK.B: Class-A level).
-  // P/E is dimensionless, so US price ÷ peTTM yields EPS in the traded
-  // share's own currency and class. Underivable -> null (Yahoo back-fills).
-  const peTTM = num(metric.peTTM);
-  const trailingEps = currentPrice != null && peTTM != null && peTTM > 0
-    ? currentPrice / peTTM
-    : null;
-
+  const adjusted = adjustedTtmFromEarnings(earnings);
   return {
     ok: true,
     errors,
-    currentPrice,
-    previousClose: unknownQuote ? null : num(quote.pc),
-    trailingEps,
+    // The caller combines this dimensionless P/E with Yahoo's traded-share
+    // price, avoiding an ADR/other-listing currency mismatch in epsTTM.
+    trailingPE: num(metric.peTTM),
+    adjustedTtmEps: adjusted.value,
+    adjustedTtmEpsReason: adjusted.reason,
+    adjustedQuarters: adjusted.quarters,
     epsGrowthRate: fraction(metric.epsGrowthTTMYoy),
-    longName: profile.name || null,
     fundamentals: {
-      trailingPE: num(metric.peTTM),
-      forwardPE: num(metric.forwardPE),
-      priceToBook: num(metric.pb),
-      debtToEquity: num(metric["totalDebt/totalEquityQuarterly"]),
-      currentRatio: num(metric.currentRatioQuarterly),
-      revenueGrowth: fraction(metric.revenueGrowthTTMYoy),
-      returnOnEquity: fraction(metric.roeTTM),
-      returnOnAssets: fraction(metric.roaTTM),
-      grossMargins: fraction(metric.grossMarginTTM),
-      operatingMargins: fraction(metric.operatingMarginTTM),
-      profitMargins: fraction(metric.netProfitMarginTTM),
-      revenuePerShare: num(metric.revenuePerShareTTM),
-      beta: num(metric.beta),
-      sector: profile.finnhubIndustry || null,
-      industry: profile.finnhubIndustry || null,
-      marketCap: fromMillions(profile.marketCapitalization),
-      fiftyTwoWeekHigh: num(metric["52WeekHigh"]),
-      fiftyTwoWeekLow: num(metric["52WeekLow"]),
+      trailingPE: num(metric.peTTM), forwardPE: num(metric.forwardPE), priceToBook: num(metric.pb),
+      debtToEquity: num(metric["totalDebt/totalEquityQuarterly"]), currentRatio: num(metric.currentRatioQuarterly),
+      revenueGrowth: fraction(metric.revenueGrowthTTMYoy), returnOnEquity: fraction(metric.roeTTM),
+      returnOnAssets: fraction(metric.roaTTM), grossMargins: fraction(metric.grossMarginTTM),
+      operatingMargins: fraction(metric.operatingMarginTTM), profitMargins: fraction(metric.netProfitMarginTTM),
+      revenuePerShare: num(metric.revenuePerShareTTM), beta: num(metric.beta),
+      fiftyTwoWeekHigh: num(metric["52WeekHigh"]), fiftyTwoWeekLow: num(metric["52WeekLow"]),
       dividendYield: fraction(metric.dividendYieldIndicatedAnnual),
-      sharesOutstanding: fromMillions(profile.shareOutstanding),
     },
   };
 }
 
-// Small concurrency pool: 3 Finnhub calls per ticker, so 5 concurrent tickers
-// keeps a full-table refresh under the 30 calls/sec burst cap.
 export async function fetchFundamentalsBatch(tickers, limit = 5) {
   const results = {};
   const queue = [...tickers];
   async function worker() {
     while (queue.length > 0) {
       const ticker = queue.shift();
-      try {
-        results[ticker] = await fetchTickerFundamentals(ticker);
-      } catch (error) {
-        results[ticker] = { ok: false, errors: [error?.message || String(error)] };
-      }
+      try { results[ticker] = await fetchTickerFundamentals(ticker); }
+      catch (error) { results[ticker] = { ok: false, errors: [error?.message || String(error)] }; }
     }
   }
   await Promise.all(Array.from({ length: Math.min(limit, tickers.length) }, worker));

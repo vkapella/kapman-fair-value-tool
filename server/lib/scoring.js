@@ -61,7 +61,7 @@ function buildOverrides(factors) {
 export function computeScores(stock, factors, fundamentals, globals) {
   const flatFundamentals = buildFundamentalsInput(fundamentals, factors);
   const overrides = buildOverrides(factors);
-  const iv = calcIV(stock.ttmEPS, stock.growth, globals);
+  const iv = calcIV(stock.valuationTtmEps ?? stock.ttmEPS, stock.growth, globals);
   const pctIV = calcPctIV(stock.currentPrice, iv);
 
   const scores = {};

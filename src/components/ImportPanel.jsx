@@ -123,7 +123,7 @@ export default function ImportPanel({ onImported }) {
             Preview {tickers.length || ""} ticker{tickers.length === 1 ? "" : "s"}
           </button>
           <span className="text-[10px] text-zinc-500 font-mono">
-            Price, TTM EPS, and scoring factors come from Finnhub/Yahoo.
+            Price, GAAP/adjusted EPS, and scoring factors come from Finnhub/Yahoo.
           </span>
         </div>
 
@@ -176,7 +176,7 @@ export default function ImportPanel({ onImported }) {
                           {add.longName && <span className="block truncate text-[10px] font-normal text-zinc-600">{add.longName}</span>}
                         </span>
                         <span className="text-zinc-500">price ${formatNumber(add.currentPrice)}</span>
-                        <span className="text-zinc-500">EPS {formatNumber(add.ttmEPS)}</span>
+                        <span className="text-zinc-500">Val EPS {formatNumber(add.valuationTtmEps)}</span>
                         <span className="text-zinc-500">growth {formatNumber(add.growth, 0)}%</span>
                         <span className="text-zinc-500">%IV {formatNumber(add.pctIV, 1)}</span>
                       </div>

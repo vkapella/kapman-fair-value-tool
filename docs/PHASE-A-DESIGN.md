@@ -9,6 +9,12 @@ This is the current design of record for the maintainable scoring model.
 `fundamentals_cache` retains the most recent provider payload. Snapshot tables
 hold append-only model captures.
 
+The valuation record separates reported **GAAP TTM EPS**, derived **Adjusted
+TTM EPS**, and effective **Valuation TTM EPS**. Adjusted TTM EPS is the sum of
+the latest four valid, distinct quarterly provider EPS observations. Duplicate
+periods, missing values, or malformed inputs leave it unavailable. It is never
+filled with a partial sum.
+
 ```sql
 stock_factors(ticker, factor_key, category, kind,
               manual_value, fetched_value, fetched_at, updated)
@@ -34,6 +40,17 @@ snapshots, allocation signals, the stats bar, and screening.
 - `curated_scores` preserves the operator's number across unpin/re-pin cycles.
 - `eps_pinned` independently protects operator-curated EPS while allowing live
   price refreshes.
+
+### Valuation EPS basis and pin
+
+`valuationEpsBasis` records Reported, Adjusted, or Operator as the source of
+Valuation TTM EPS. Changing the basis selects the corresponding available
+source value. `epsPinned` is independent of basis and freezes the copied
+valuation value; refreshes may update the GAAP and adjusted source fields but
+must not overwrite that pinned effective value. Editing Valuation TTM EPS
+directly records Operator and pins it. Unpinning resumes the selected source.
+`calcIV` and every downstream percentage/signal calculation consume Valuation
+TTM EPS only.
 
 Existing rows keep their current EPS and category pins across migrations.
 
@@ -69,6 +86,11 @@ POST /api/import/apply
 Quote refresh is atomic: price, eligible unpinned EPS, provider factors, and
 effective scores are saved in one transaction and returned from that same
 state.
+
+The quote refresh performs the Finnhub `/stock/metric` and `/stock/earnings`
+requests required for fundamentals and quarterly EPS; Yahoo remains the price
+source. This keeps the request shape within the free-tier budget and avoids
+browser-direct provider requests.
 
 ## Ticker intake
 
@@ -106,3 +128,8 @@ Category grids expose fetched and manual values, model and effective scores,
 assessment coverage, and category pins. The Intrinsic Value tab exposes the
 separate EPS pin. Ticker Import is an addition workflow only: it cannot update
 or unpin existing rows.
+
+Navigation uses two levels. The top level contains Main Score Card, Docs, and
+Ticker Import. Main Score Card exposes the second-level workflow and
+score-maintenance tabs: Main Score Card, Intrinsic Value, Allocation Signals,
+Valuation, Growth, Moat, Execution Risk, and Economy.

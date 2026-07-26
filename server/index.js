@@ -10,6 +10,7 @@ import { CATEGORY_KEYS, DEFAULT_JUDGMENT_OVERRIDES, FACTOR_INDEX } from "../src/
 import { fetchFundamentalsBatch, finnhubConfigured } from "./lib/finnhub.js";
 import { computeScores, coerceFactorValue } from "./lib/scoring.js";
 import { buildTickerPreview } from "./lib/import.js";
+import { selectAutomaticValuationEps } from "./lib/eps.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -18,17 +19,16 @@ const yahooFinance = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 const defaultDbDir = process.env.NODE_ENV === "production" ? "/data" : path.join(__dirname, "..", ".data");
 const DB_PATH = process.env.SQLITE_DB_PATH || path.join(defaultDbDir, "fair-value.sqlite");
 
-const STOCK_FIELDS = ["ticker", "ttmEPS", "growth", "currentPrice", "updated", "valuation", "growthScore", "moat", "executionRisk", "economy", "epsPinned", "pinnedCategories"];
+const STOCK_FIELDS = ["ticker", "ttmEPS", "gaapTtmEps", "adjustedTtmEps", "valuationTtmEps", "valuationEpsBasis", "growth", "currentPrice", "updated", "valuation", "growthScore", "moat", "executionRisk", "economy", "epsPinned", "pinnedCategories"];
 const STOCK_FIELD_SET = new Set(STOCK_FIELDS);
 // epsPinned and pinnedCategories are optional everywhere (default to
 // 0 / "unpinned"): curation flags, not part of the core row contract.
-const OPTIONAL_STOCK_FIELDS = new Set(["epsPinned", "pinnedCategories", "ttmEPS"]);
+const OPTIONAL_STOCK_FIELDS = new Set(["epsPinned", "pinnedCategories", "ttmEPS", "gaapTtmEps", "adjustedTtmEps", "valuationTtmEps", "valuationEpsBasis"]);
 const REQUIRED_STOCK_FIELDS = STOCK_FIELDS.filter((field) => !OPTIONAL_STOCK_FIELDS.has(field));
-const NUMERIC_STOCK_FIELDS = new Set(["ttmEPS", "growth", "currentPrice", "valuation", "growthScore", "moat", "executionRisk", "economy"]);
+const NUMERIC_STOCK_FIELDS = new Set(["ttmEPS", "valuationTtmEps", "growth", "currentPrice", "valuation", "growthScore", "moat", "executionRisk", "economy"]);
 const GLOBAL_FIELDS = ["peNoGrowth", "g", "avgYieldAAA", "bondYield"];
 const GLOBAL_FIELD_SET = new Set(GLOBAL_FIELDS);
 const SCORE_INPUT_STOCK_FIELDS = new Set(["ttmEPS", "growth", "currentPrice", "pinnedCategories"]);
-const FUND_QUOTE_TYPES = new Set(["ETF", "MUTUALFUND"]);
 
 const stockColumnByField = {
   ticker: "ticker",
@@ -42,6 +42,8 @@ const stockColumnByField = {
   executionRisk: "execution_risk",
   economy: "economy",
   epsPinned: "eps_pinned",
+  valuationTtmEps: "ttm_eps",
+  valuationEpsBasis: "valuation_eps_basis",
   pinnedCategories: "pinned_categories",
   curatedScores: "curated_scores",
 };
@@ -198,15 +200,38 @@ if (db.prepare("PRAGMA table_info(stocks)").all().find((c) => c.name === "ttm_ep
   })();
 }
 
+// EPS v2: retain the original ttm_eps column as the valuation input for
+// backward compatibility, and store provider series/provenance separately.
+// Existing pinned numbers are necessarily operator values; unpinned legacy
+// values remain available until the next source refresh selects a basis.
+const EPS_COLUMNS = [
+  ["gaap_ttm_eps", "REAL"], ["gaap_eps_source", "TEXT"], ["gaap_eps_fetched_at", "TEXT"], ["gaap_eps_reason", "TEXT"],
+  ["adjusted_ttm_eps", "REAL"], ["adjusted_eps_source", "TEXT"], ["adjusted_eps_fetched_at", "TEXT"], ["adjusted_eps_reason", "TEXT"],
+  ["valuation_eps_basis", "TEXT NOT NULL DEFAULT ''"],
+];
+const stockColumns = new Set(db.prepare("PRAGMA table_info(stocks)").all().map((column) => column.name));
+if (!stockColumns.has("valuation_eps_basis")) {
+  db.transaction(() => {
+    for (const [name, definition] of EPS_COLUMNS) {
+      if (!stockColumns.has(name)) db.exec(`ALTER TABLE stocks ADD COLUMN ${name} ${definition}`);
+    }
+    db.prepare("UPDATE stocks SET valuation_eps_basis = 'operator' WHERE eps_pinned = 1 AND valuation_eps_basis = ''").run();
+  })();
+} else {
+  for (const [name, definition] of EPS_COLUMNS) {
+    if (!stockColumns.has(name)) db.exec(`ALTER TABLE stocks ADD COLUMN ${name} ${definition}`);
+  }
+}
+
 const insertStock = db.prepare(`
   INSERT INTO stocks (
     ticker, ttm_eps, growth, current_price, updated, valuation,
     growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories,
-    curated_scores, position
+    curated_scores, valuation_eps_basis, position
   ) VALUES (
     @ticker, @ttmEPS, @growth, @currentPrice, @updated, @valuation,
     @growthScore, @moat, @executionRisk, @economy, @epsPinned, @pinnedCategories,
-    @curatedScores, @position
+    @curatedScores, @valuationEpsBasis, @position
   )
 `);
 
@@ -218,6 +243,7 @@ const seedDatabase = db.transaction(() => {
     // /api/quotes refresh on a fresh install can't recompute over it.
     SEED_STOCKS.forEach((stock, index) => insertStock.run({
       epsPinned: 0,
+      valuationEpsBasis: "",
       pinnedCategories: CATEGORY_KEYS.join(","),
       ...stock,
       curatedScores: JSON.stringify(Object.fromEntries(CATEGORY_KEYS.map((c) => [c, stock[c]]))),
@@ -302,6 +328,9 @@ function normalizePinnedCategories(value) {
 function normalizeStockPayload(payload, { partial = false } = {}) {
   if (!isPlainObject(payload)) throw apiError(400, "request body must be a JSON object");
   assertKnownFields(payload, STOCK_FIELD_SET);
+  if (Object.prototype.hasOwnProperty.call(payload, "gaapTtmEps") || Object.prototype.hasOwnProperty.call(payload, "adjustedTtmEps")) {
+    throw apiError(400, "gaapTtmEps and adjustedTtmEps are provider-managed; set valuationTtmEps with valuationEpsBasis: operator instead");
+  }
 
   if (!partial) {
     const missing = REQUIRED_STOCK_FIELDS.filter((field) => payload[field] == null);
@@ -319,6 +348,14 @@ function normalizeStockPayload(payload, { partial = false } = {}) {
     else if (payload.epsPinned === false || payload.epsPinned === 0) stock.epsPinned = 0;
     else throw apiError(400, "epsPinned must be a boolean");
   }
+  if (payload.valuationEpsBasis != null) {
+    if (typeof payload.valuationEpsBasis !== "string") throw apiError(400, "valuationEpsBasis must be a string");
+    const basis = payload.valuationEpsBasis.trim().toLowerCase();
+    if (!new Set(["reported", "adjusted", "operator", "auto"]).has(basis)) {
+      throw apiError(400, "valuationEpsBasis must be reported, adjusted, operator, or auto");
+    }
+    stock.valuationEpsBasis = basis;
+  }
   if (payload.pinnedCategories != null) {
     stock.pinnedCategories = normalizePinnedCategories(payload.pinnedCategories).join(",");
   }
@@ -328,12 +365,46 @@ function normalizeStockPayload(payload, { partial = false } = {}) {
   if (Object.prototype.hasOwnProperty.call(payload, "ttmEPS") && payload.ttmEPS === null) {
     stock.ttmEPS = null;
   }
+  if (Object.prototype.hasOwnProperty.call(payload, "valuationTtmEps") && payload.valuationTtmEps === null) {
+    stock.valuationTtmEps = null;
+  }
   for (const field of NUMERIC_STOCK_FIELDS) {
     if (payload[field] != null) stock[field] = normalizeFiniteNumber(payload[field], field);
+  }
+  if (stock.valuationTtmEps != null) {
+    if (stock.ttmEPS != null && stock.ttmEPS !== stock.valuationTtmEps) {
+      throw apiError(400, "ttmEPS and valuationTtmEps must match when both are supplied");
+    }
+    stock.ttmEPS = stock.valuationTtmEps;
+    delete stock.valuationTtmEps;
   }
 
   if (partial && Object.keys(stock).length === 0) throw apiError(400, "at least one stock field is required");
   return stock;
+}
+
+function valuationEpsForRow(row) {
+  const basis = row.valuation_eps_basis || (row.eps_pinned ? "operator" : "auto");
+  // Pinning freezes the copied valuation number, not the provider series.
+  // Source rows can refresh underneath it, so a pinned response must always
+  // return the stored valuation rather than resolving the live source again.
+  if (row.eps_pinned) {
+    return {
+      basis: basis === "auto" ? "operator" : basis,
+      value: row.ttm_eps,
+      reason: row.ttm_eps == null ? "pinned valuation EPS is unavailable" : null,
+    };
+  }
+  if (basis === "reported") return { basis, value: row.gaap_ttm_eps, reason: row.gaap_eps_reason };
+  if (basis === "adjusted") return { basis, value: row.adjusted_ttm_eps, reason: row.adjusted_eps_reason };
+  if (basis === "operator") return { basis, value: row.ttm_eps, reason: row.ttm_eps == null ? "operator valuation EPS is unavailable" : null };
+  const automatic = selectAutomaticValuationEps(row.gaap_ttm_eps, row.adjusted_ttm_eps);
+  // Preserve a pre-v2 unpinned value until its first source refresh. Once a
+  // refresh has occurred, a missing source intentionally yields null instead.
+  if (automatic.value == null && !row.gaap_eps_fetched_at && !row.adjusted_eps_fetched_at && row.ttm_eps != null) {
+    return { basis: "auto", value: row.ttm_eps, reason: "legacy valuation EPS awaiting source refresh" };
+  }
+  return automatic;
 }
 
 function normalizeGlobalsPayload(payload) {
@@ -349,9 +420,21 @@ function normalizeGlobalsPayload(payload) {
 }
 
 function stockFromRow(row) {
+  const valuationEps = valuationEpsForRow(row);
   return {
     ticker: row.ticker,
-    ttmEPS: row.ttm_eps,
+    // ttmEPS remains as a legacy alias, while all new callers should use the
+    // explicit valuationTtmEps field.
+    ttmEPS: valuationEps.value,
+    gaapTtmEps: row.gaap_ttm_eps,
+    adjustedTtmEps: row.adjusted_ttm_eps,
+    valuationTtmEps: valuationEps.value,
+    valuationEpsBasis: valuationEps.basis,
+    eps: {
+      gaap: { value: row.gaap_ttm_eps, source: row.gaap_eps_source, fetchedAt: row.gaap_eps_fetched_at, unavailableReason: row.gaap_eps_reason },
+      adjusted: { value: row.adjusted_ttm_eps, source: row.adjusted_eps_source, fetchedAt: row.adjusted_eps_fetched_at, unavailableReason: row.adjusted_eps_reason },
+      valuation: { value: valuationEps.value, basis: valuationEps.basis, pinned: Boolean(row.eps_pinned), unavailableReason: valuationEps.reason },
+    },
     growth: row.growth,
     currentPrice: row.current_price,
     updated: row.updated,
@@ -378,7 +461,9 @@ function globalsFromRow(row) {
 function getStocks() {
   return db.prepare(`
     SELECT ticker, ttm_eps, growth, current_price, updated, valuation,
-      growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories, curated_scores
+      growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories, curated_scores,
+      gaap_ttm_eps, gaap_eps_source, gaap_eps_fetched_at, gaap_eps_reason,
+      adjusted_ttm_eps, adjusted_eps_source, adjusted_eps_fetched_at, adjusted_eps_reason, valuation_eps_basis
     FROM stocks
     ORDER BY position ASC, ticker ASC
   `).all().map(stockFromRow);
@@ -396,7 +481,9 @@ function getGlobals() {
 function getStockByTicker(ticker) {
   const row = db.prepare(`
     SELECT ticker, ttm_eps, growth, current_price, updated, valuation,
-      growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories, curated_scores
+      growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories, curated_scores,
+      gaap_ttm_eps, gaap_eps_source, gaap_eps_fetched_at, gaap_eps_reason,
+      adjusted_ttm_eps, adjusted_eps_source, adjusted_eps_fetched_at, adjusted_eps_reason, valuation_eps_basis
     FROM stocks
     WHERE ticker = ?
   `).get(ticker);
@@ -656,6 +743,7 @@ app.post("/api/stocks", handleRoute((req, res) => {
   // insertion path.
   insertStock.run({
     epsPinned: 0,
+    valuationEpsBasis: stock.valuationEpsBasis || (stock.epsPinned ? "operator" : ""),
     pinnedCategories: CATEGORY_KEYS.join(","),
     ...stock,
     // The supplied scores are explicit operator-curated values.
@@ -677,11 +765,27 @@ app.put("/api/stocks/:ticker", handleRoute((req, res) => {
     throw apiError(409, `stock ${nextTicker} already exists`);
   }
 
+  // Pin controls refresh ownership; basis records where the currently copied
+  // valuation came from. A pinned reported/adjusted value stays frozen while
+  // its source series continues to refresh in the background.
+  const manuallyEditedValuation = Object.prototype.hasOwnProperty.call(patch, "ttmEPS");
+  if (manuallyEditedValuation && !patch.valuationEpsBasis) {
+    patch.valuationEpsBasis = "operator";
+    patch.epsPinned = 1;
+  } else if (patch.epsPinned === 0 && !patch.valuationEpsBasis && current.valuationEpsBasis === "operator") {
+    patch.valuationEpsBasis = "auto";
+  }
+  if (patch.valuationEpsBasis === "reported") patch.ttmEPS = current.gaapTtmEps;
+  if (patch.valuationEpsBasis === "adjusted") patch.ttmEPS = current.adjustedTtmEps;
+  if (patch.valuationEpsBasis === "auto") {
+    patch.ttmEPS = selectAutomaticValuationEps(current.gaapTtmEps, current.adjustedTtmEps).value;
+  }
+
   // Pin invariant is enforced HERE, not in the SPA: a stale browser session
   // (loaded before rows were pinned) still refreshes with epsPinned=false in
   // memory and would silently clobber curated EPS. Intentional writers
   // (manual edit, importer) always send epsPinned alongside ttmEPS.
-  if (current.epsPinned && patch.ttmEPS != null && patch.epsPinned == null) {
+  if (current.epsPinned && patch.ttmEPS != null && patch.epsPinned == null && patch.valuationEpsBasis == null) {
     throw apiError(409, `stock ${currentTicker} EPS is pinned (curated); include epsPinned to overwrite it`);
   }
 
@@ -799,19 +903,22 @@ app.post("/api/prices", async (req, res) => {
 // source; Yahoo back-fills only the fields Finnhub's free tier lacks
 // (ownership, short interest, cash/debt/FCF levels, forward EPS). Shared by
 // POST /api/quotes and POST /api/snapshot.
-async function buildQuoteMap(normalized) {
+async function buildQuoteMap(normalized, { includeProfiles = false } = {}) {
   const finnhubByTicker = finnhubConfigured() ? await fetchFundamentalsBatch(normalized) : {};
 
   const result = {};
   await Promise.all(
     normalized.map(async (t) => {
-        const yahooSymbol = yahooSymbolFromTicker(t);
-        try {
+      const yahooSymbol = yahooSymbolFromTicker(t);
+      try {
+          const cachedQuote = getFundamentalsCache(t);
+          const summaryModules = ["defaultKeyStatistics", "financialData", "price", "summaryDetail", "majorHoldersBreakdown"];
+          if (includeProfiles) summaryModules.push("assetProfile");
           const [quote, summary] = await Promise.all([
             yahooFinance.quote(yahooSymbol, {}, { validateResult: false }).catch(() => null),
             yahooFinance.quoteSummary(
               yahooSymbol,
-              { modules: ["defaultKeyStatistics", "financialData", "price", "summaryDetail", "assetProfile", "majorHoldersBreakdown"] },
+              { modules: summaryModules },
               { validateResult: false }
             ).catch(() => null),
           ]);
@@ -822,15 +929,34 @@ async function buildQuoteMap(normalized) {
             ? summary.financialData.debtToEquity / 100
             : null;
 
+          const yahooCurrentPrice = quote?.regularMarketPrice ?? summary?.price?.regularMarketPrice ?? null;
+          const yahooPreviousClose = quote?.regularMarketPreviousClose ?? summary?.price?.regularMarketPreviousClose ?? null;
+          const finnhubDerivedGaap = fh?.trailingPE != null && fh.trailingPE > 0 && yahooCurrentPrice != null
+            ? yahooCurrentPrice / fh.trailingPE
+            : null;
+          const yahooTrailingEps = quote?.trailingEps ?? summary?.defaultKeyStatistics?.trailingEps ?? null;
+          const gaapTtmEps = finnhubDerivedGaap ?? yahooTrailingEps;
+          const gaapSource = finnhubDerivedGaap != null
+            ? "finnhub.metric.peTTM+yahoo.price"
+            : yahooTrailingEps != null ? "yahoo.trailingEps" : null;
           result[t] = {
-            currentPrice: fh?.currentPrice ?? quote?.regularMarketPrice ?? summary?.price?.regularMarketPrice ?? null,
-            previousClose: fh?.previousClose ?? quote?.regularMarketPreviousClose ?? summary?.price?.regularMarketPreviousClose ?? null,
-            trailingEps: fh?.trailingEps ?? summary?.defaultKeyStatistics?.trailingEps ?? quote?.trailingEps ?? null,
+            // Yahoo is the only price source. Finnhub's normal refresh is
+            // deliberately limited to /stock/metric and /stock/earnings.
+            currentPrice: yahooCurrentPrice,
+            previousClose: yahooPreviousClose,
+            gaapTtmEps,
+            gaapTtmEpsReason: gaapTtmEps == null ? "no usable Finnhub P/E + Yahoo price or Yahoo trailing EPS" : null,
+            adjustedTtmEps: fh?.adjustedTtmEps ?? null,
+            adjustedTtmEpsReason: fh?.adjustedTtmEpsReason ?? (fh ? null : "Finnhub earnings unavailable"),
+            adjustedQuarters: fh?.adjustedQuarters ?? [],
+            // Retained only as an API compatibility alias; valuation selection
+            // below never consumes Yahoo's trailing EPS.
+            trailingEps: gaapTtmEps,
             forwardEps: summary?.defaultKeyStatistics?.forwardEps ?? quote?.forwardEps ?? null,
             epsGrowthRate: fh?.epsGrowthRate ?? summary?.financialData?.earningsGrowth ?? quote?.earningsGrowth ?? null,
-            longName: fh?.longName ?? quote?.longName ?? summary?.price?.longName ?? summary?.price?.shortName ?? null,
+            longName: quote?.longName ?? summary?.price?.longName ?? summary?.price?.shortName ?? null,
             quoteType: quote?.quoteType ?? summary?.price?.quoteType ?? null,
-            source: { finnhub: Boolean(fh), yahoo: Boolean(quote || summary) },
+            source: { finnhub: Boolean(fh), yahoo: Boolean(quote || summary), price: "yahoo", gaapTtmEps: gaapSource, adjustedTtmEps: fh?.adjustedTtmEps != null ? "finnhub.earnings" : null },
             fundamentals: {
               ...emptyFundamentals(),
               trailingPE: fh?.fundamentals.trailingPE ?? summary?.summaryDetail?.trailingPE ?? null,
@@ -849,8 +975,8 @@ async function buildQuoteMap(normalized) {
               profitMargins: fh?.fundamentals.profitMargins ?? summary?.financialData?.profitMargins ?? null,
               revenuePerShare: fh?.fundamentals.revenuePerShare ?? summary?.financialData?.revenuePerShare ?? null,
               beta: fh?.fundamentals.beta ?? summary?.summaryDetail?.beta ?? null,
-              sector: summary?.assetProfile?.sector ?? fh?.fundamentals.sector ?? null,
-              industry: summary?.assetProfile?.industry ?? fh?.fundamentals.industry ?? null,
+              sector: summary?.assetProfile?.sector ?? cachedQuote?.fundamentals?.sector ?? null,
+              industry: summary?.assetProfile?.industry ?? cachedQuote?.fundamentals?.industry ?? null,
               marketCap: fh?.fundamentals.marketCap ?? summary?.summaryDetail?.marketCap ?? null,
               fiftyTwoWeekHigh: fh?.fundamentals.fiftyTwoWeekHigh ?? summary?.summaryDetail?.fiftyTwoWeekHigh ?? null,
               fiftyTwoWeekLow: fh?.fundamentals.fiftyTwoWeekLow ?? summary?.summaryDetail?.fiftyTwoWeekLow ?? null,
@@ -878,10 +1004,20 @@ async function buildQuoteMap(normalized) {
 function persistQuotesAndRecompute(tickers, quoteMap) {
   const now = new Date().toISOString();
   const trackedTickers = new Map(getStocks().map((stock) => [stock.ticker, stock]));
+  const updateEpsSources = db.prepare(`
+    UPDATE stocks SET
+      gaap_ttm_eps = @gaapTtmEps, gaap_eps_source = @gaapSource,
+      gaap_eps_fetched_at = @fetchedAt, gaap_eps_reason = @gaapReason,
+      adjusted_ttm_eps = @adjustedTtmEps, adjusted_eps_source = @adjustedSource,
+      adjusted_eps_fetched_at = @fetchedAt, adjusted_eps_reason = @adjustedReason
+    WHERE ticker = @ticker
+  `);
+  const updateValuationEps = db.prepare(`
+    UPDATE stocks
+    SET ttm_eps = @valuationTtmEps, valuation_eps_basis = @valuationEpsBasis, updated = @updated
+    WHERE ticker = @ticker
+  `);
   const updatePrice = db.prepare("UPDATE stocks SET current_price = ? WHERE ticker = ?");
-  const updatePriceAndEps = db.prepare(
-    "UPDATE stocks SET current_price = @currentPrice, ttm_eps = @ttmEPS, updated = @updated WHERE ticker = @ticker"
-  );
 
   return db.transaction(() => {
     const stocks = [];
@@ -902,17 +1038,43 @@ function persistQuotesAndRecompute(tickers, quoteMap) {
         upsertFactorFetched.run({ ticker, factorKey: key, category: info.category, kind: info.kind, fetchedValue: String(value), fetchedAt: now, updated: now });
       }
 
-      const currentPrice = quote.currentPrice ?? quote.previousClose;
-      if (currentPrice != null) {
-        const mayRefreshEps = !stock.epsPinned
-          && !FUND_QUOTE_TYPES.has(quote.quoteType)
-          && quote.trailingEps != null;
-        if (mayRefreshEps) {
-          updatePriceAndEps.run({ ticker, currentPrice, ttmEPS: quote.trailingEps, updated: todayShort() });
-        } else {
-          updatePrice.run(currentPrice, ticker);
+      const basis = stock.valuationEpsBasis || (stock.epsPinned ? "operator" : "auto");
+      let valuationTtmEps = stock.valuationTtmEps;
+      let valuationEpsBasis = basis;
+      if (!stock.epsPinned) {
+        if (basis === "reported") valuationTtmEps = quote.gaapTtmEps;
+        else if (basis === "adjusted") valuationTtmEps = quote.adjustedTtmEps;
+        else if (basis === "auto") {
+          const automatic = selectAutomaticValuationEps(quote.gaapTtmEps, quote.adjustedTtmEps);
+          valuationTtmEps = automatic.value;
+          valuationEpsBasis = automatic.basis;
         }
       }
+
+      // Source series always refresh, including an operator-pinned valuation.
+      // This transaction updates both series and the selected valuation EPS
+      // atomically, so GET /api/data never observes a mixed refresh state.
+      updateEpsSources.run({
+        ticker,
+        gaapTtmEps: quote.gaapTtmEps,
+        gaapSource: quote.source?.gaapTtmEps || "finnhub.metric",
+        gaapReason: quote.gaapTtmEpsReason,
+        adjustedTtmEps: quote.adjustedTtmEps,
+        adjustedSource: quote.source?.adjustedTtmEps || "finnhub.earnings",
+        adjustedReason: quote.adjustedTtmEpsReason,
+        fetchedAt: now,
+      });
+      // A pinned valuation is immutable under refresh. For an unpinned row,
+      // a missing selected source intentionally clears valuation EPS so IV
+      // abstains rather than relying on a stale positive value.
+      if (!stock.epsPinned && (
+        valuationTtmEps !== stock.valuationTtmEps
+        || valuationEpsBasis !== stock.valuationEpsBasis
+      )) {
+        updateValuationEps.run({ ticker, valuationTtmEps, valuationEpsBasis, updated: todayShort() });
+      }
+      const currentPrice = quote.currentPrice ?? quote.previousClose;
+      if (currentPrice != null) updatePrice.run(currentPrice, ticker);
 
       const result = recomputeScoresForTicker(ticker);
       stocks.push(result.stock);
@@ -965,7 +1127,7 @@ async function takeSnapshot() {
   const rows = stocks.map((s) => {
     const quote = quoteMap[s.ticker] || null;
     const currentPrice = quote?.currentPrice ?? quote?.previousClose ?? s.currentPrice;
-    const iv = calcIV(s.ttmEPS, s.growth, globals);
+    const iv = calcIV(s.valuationTtmEps, s.growth, globals);
     const pctIV = calcPctIV(currentPrice, iv);
     const score = calcScore(s);
     return {
@@ -1045,7 +1207,7 @@ function normalizeTickerList(payload, field = "tickers") {
 app.post("/api/import/tickers", handleRoute(async (req, res) => {
   if (!isPlainObject(req.body)) throw apiError(400, "request body must be a JSON object");
   const tickers = normalizeTickerList(req.body.tickers);
-  const quotes = await buildQuoteMap(tickers);
+  const quotes = await buildQuoteMap(tickers, { includeProfiles: true });
   res.json(buildTickerPreview({
     tickers,
     stocks: getStocks(),
@@ -1057,7 +1219,7 @@ app.post("/api/import/tickers", handleRoute(async (req, res) => {
 app.post("/api/import/apply", handleRoute(async (req, res) => {
   if (!isPlainObject(req.body)) throw apiError(400, "request body must be a JSON object");
   const tickers = normalizeTickerList(req.body.addTickers, "addTickers");
-  const quotes = await buildQuoteMap(tickers);
+  const quotes = await buildQuoteMap(tickers, { includeProfiles: true });
   const preview = buildTickerPreview({
     tickers,
     stocks: getStocks(),
@@ -1082,7 +1244,7 @@ app.post("/api/import/apply", handleRoute(async (req, res) => {
     for (const add of preview.adds) {
       insertStock.run({
         ticker: add.ticker,
-        ttmEPS: add.ttmEPS,
+        ttmEPS: add.valuationTtmEps,
         growth: add.growth,
         currentPrice: add.currentPrice,
         updated: add.updated,
@@ -1092,6 +1254,7 @@ app.post("/api/import/apply", handleRoute(async (req, res) => {
         executionRisk: 0,
         economy: 0,
         epsPinned: 0,
+        valuationEpsBasis: "auto",
         pinnedCategories: "",
         curatedScores: "{}",
         position: position++,

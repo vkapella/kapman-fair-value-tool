@@ -11,15 +11,10 @@ import IntrinsicTable from "./components/IntrinsicTable.jsx";
 import AllocationTable from "./components/AllocationTable.jsx";
 import CategoryGrid from "./components/CategoryGrid.jsx";
 import ImportPanel from "./components/ImportPanel.jsx";
+import DocsPanel from "./components/DocsPanel.jsx";
 import ScoringWorksheet from "./components/ScoringWorksheet.jsx";
 import StatePanel from "./components/StatePanel.jsx";
 import { CATEGORY_KEYS } from "./lib/rubric.js";
-
-// Funds have no provider EPS (Finnhub /stock/metric and Yahoo key statistics
-// both return nothing for ETFs), so their ttmEPS is operator-curated like
-// `growth` and refresh must never touch it.
-const FUND_QUOTE_TYPES = new Set(["ETF", "MUTUALFUND"]);
-const isFundQuote = (quote) => FUND_QUOTE_TYPES.has(quote?.quoteType);
 
 export default function App() {
   const [stocks, setStocks] = useState([]);
@@ -29,6 +24,7 @@ export default function App() {
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState("");
   const [tab, setTab] = useState("scorecard");
+  const [topTab, setTopTab] = useState("main");
   const [sortBy, setSortBy] = useState("score");
   const [sortDir, setSortDir] = useState("desc");
   const [storageStatus, setStorageStatus] = useState("loading");
@@ -80,17 +76,34 @@ export default function App() {
     };
   }, []);
 
+  // A session should return to the last working view without making a stale
+  // browser preference permanent across devices or future sessions.
+  useEffect(() => {
+    const savedTab = window.sessionStorage.getItem("kapman-main-subtab");
+    if (savedTab) setTab(savedTab);
+  }, []);
+
+  const selectMainTab = (nextTab) => {
+    setTab(nextTab);
+    window.sessionStorage.setItem("kapman-main-subtab", nextTab);
+  };
+
   const rows = useMemo(() => stocks.map((s) => {
-    const iv = calcIV(s.ttmEPS, s.growth, globals);
+    // Old saved rows remain usable until the server has refreshed/migrated
+    // them. New contract fields always take precedence over legacy ttmEPS.
+    const gaapTtmEps = s.gaapTtmEps ?? s.eps?.gaap?.value ?? null;
+    const adjustedTtmEps = s.adjustedTtmEps ?? s.eps?.adjusted?.value ?? null;
+    const valuationTtmEps = s.valuationTtmEps ?? s.eps?.valuation?.value ?? s.ttmEPS ?? null;
+    const valuationEpsBasis = s.valuationEpsBasis || s.eps?.valuation?.basis || "operator";
+    const iv = calcIV(valuationTtmEps, s.growth, globals);
     const pctIV = calcPctIV(s.currentPrice, iv);
     const score = calcScore(s);
     const sig = allocationSignals(s, iv, pctIV, score);
-    const pe = s.ttmEPS > 0 ? s.currentPrice / s.ttmEPS : null; // negative/absent EPS has no meaningful P/E
+    const pe = valuationTtmEps > 0 ? s.currentPrice / valuationTtmEps : null; // negative/absent EPS has no meaningful P/E
     const forwardEps = yahooData[s.ticker]?.forwardEps ?? null;
     const forwardPe = forwardEps > 0 ? s.currentPrice / forwardEps : null;
     const quote = yahooData[s.ticker];
-    const epsCurated = Boolean(s.epsPinned) || (quote ? isFundQuote(quote) || quote.trailingEps == null : false);
-    return { ...s, pe, forwardEps, forwardPe, iv, pctIV, score, epsCurated, ...sig };
+    return { ...s, gaapTtmEps, adjustedTtmEps, valuationTtmEps, valuationEpsBasis, pe, forwardEps, forwardPe, iv, pctIV, score, ...sig };
   }), [stocks, globals, yahooData]);
 
   const sorted = useMemo(() => {
@@ -166,7 +179,7 @@ export default function App() {
 
   const addStock = async () => {
     const stock = {
-      ticker: nextNewTicker(stocks), ttmEPS: 1, growth: 10, currentPrice: 10,
+      ticker: nextNewTicker(stocks), valuationTtmEps: 1, valuationEpsBasis: "operator", epsPinned: true, growth: 10, currentPrice: 10,
       updated: todayShort(),
       valuation: 10, growthScore: 10, moat: 10, executionRisk: 5, economy: 15,
     };
@@ -229,16 +242,16 @@ export default function App() {
       setStocks((prev) => prev.map((stock) => savedByTicker.get(stock.ticker) || stock));
       setFactorsState((prev) => ({ ...prev, ...(payload.factors || {}) }));
       setComputedState((prev) => ({ ...prev, ...(payload.computed || {}) }));
-      const priceOnly = stocks
+      const sourceUnavailable = stocks
         .filter((stock) => {
           const quote = quoteMap[stock.ticker];
-          return quote && (stock.epsPinned || isFundQuote(quote) || quote.trailingEps == null);
+          return quote && quote.gaapTtmEps == null && quote.adjustedTtmEps == null;
         })
         .map((stock) => stock.ticker);
       setRefreshMsg(
-        priceOnly.length === 0
+        sourceUnavailable.length === 0
           ? `Updated ${savedStocks.length}/${stocks.length} rows`
-          : `Updated ${savedStocks.length}/${stocks.length} rows — price-only (EPS stays curated): ${priceOnly.join(", ")}`
+          : `Updated ${savedStocks.length}/${stocks.length} rows — provider EPS unavailable: ${sourceUnavailable.join(", ")}`
       );
     } catch (e) {
       setRefreshMsg(`Refresh failed: ${e.message}`);
@@ -352,11 +365,11 @@ export default function App() {
 
         <StatsBar rowsCount={rows.length} stats={stats} />
 
-        <TabBar tab={tab} setTab={setTab} addStock={addStock} dataLoading={dataLoading} dataError={dataError} />
+        <TabBar topTab={topTab} setTopTab={setTopTab} tab={tab} setTab={selectMainTab} addStock={addStock} dataLoading={dataLoading} dataError={dataError} />
 
         <main className="max-w-[1500px] mx-auto px-6 py-6">
-          {dataLoading && <StatePanel title="Loading watchlist" message="Reading stocks and formula variables from the server database." />}
-          {!dataLoading && dataError && (
+          {topTab === "main" && dataLoading && <StatePanel title="Loading watchlist" message="Reading stocks and formula variables from the server database." />}
+          {topTab === "main" && !dataLoading && dataError && (
             <StatePanel
               title="Unable to load saved data"
               message={`The server database could not be reached: ${dataError}`}
@@ -364,7 +377,9 @@ export default function App() {
               onAction={loadData}
             />
           )}
-          {!dataLoading && !dataError && (
+          {topTab === "docs" && <DocsPanel />}
+          {topTab === "import" && <ImportPanel onImported={loadData} />}
+          {!dataLoading && !dataError && topTab === "main" && (
             <>
               {tab === "scorecard" && <ScoreCardTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} onOpenWorksheet={handleOpenWorksheet} worksheetLoading={worksheetLoading} />}
               {tab === "intrinsic" && (
@@ -394,7 +409,6 @@ export default function App() {
                   sortToggle={sortToggle}
                 />
               )}
-              {tab === "import" && <ImportPanel onImported={loadData} />}
             </>
           )}
 

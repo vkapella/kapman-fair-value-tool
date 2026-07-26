@@ -219,6 +219,30 @@ The `fly.toml` mount maps that volume to `/data`, so the watchlist survives app 
 - **Prices** (`/api/prices`): Yahoo Finance via `yahoo-finance2` (no key required).
 - **Fundamentals** (`/api/quotes`): Finnhub free tier is the primary source (key required, 60 calls/min, US symbols); Yahoo back-fills ownership, short interest, cash/debt/FCF levels, and forward EPS. Finnhub values are unit-normalized to fractions/absolute dollars to match the rubric.
 
+### EPS, valuation basis, and refresh behavior
+
+The Intrinsic Value view distinguishes three earnings fields:
+
+- **GAAP TTM EPS** — Yahoo traded-share price divided by Finnhub trailing P/E,
+  with Yahoo trailing EPS as the fallback.
+- **Adjusted TTM EPS** — the sum of the latest four valid, distinct Finnhub
+  `/stock/earnings` `actual` values. It is unavailable rather than estimated
+  if a complete, usable four-quarter set cannot be established.
+- **Valuation TTM EPS** — the earnings input used by the intrinsic-value formula.
+
+Valuation TTM EPS has an explicit Reported, Adjusted, or Operator basis.
+Selecting a source copies its current value and records that basis. A pin is
+independent of the basis: it freezes the copied valuation value until unpinned,
+while provider refreshes continue updating both source EPS fields. Editing the
+valuation value directly records Operator and pins it. The formula always uses
+Valuation TTM EPS, never a display-only GAAP or adjusted value.
+
+The refresh path is intentionally budgeted for Finnhub's free tier: it requests
+the per-symbol `/stock/metric` and `/stock/earnings` data needed for
+fundamentals/quarterly EPS, while Yahoo supplies the price. Refreshes should be
+run deliberately for the selected watchlist rather than treated as streaming
+market data.
+
 `/api/quotes` atomically persists eligible price/EPS updates and provider
 factors, recomputes every unpinned category, and returns the authoritative
 saved rows in the same response.
@@ -257,4 +281,9 @@ A single shared-cpu-1x@256MB machine with `auto_stop_machines = "stop"` costs ro
 
 ## Disclaimer
 
-Not financial advice. Intrinsic value calculations are heuristics — they don't account for debt, capital structure, sector dynamics, or macro conditions. Use as a screening tool, not a buy/sell signal.
+Not financial advice. Intrinsic value calculations, scorecards, valuation
+bases, and allocation labels are screening heuristics, not recommendations or
+buy/sell signals. They can be incomplete, stale, or wrong and do not account
+for every relevant factor, including debt, capital structure, sector dynamics,
+taxes, liquidity, or macro conditions. Verify source data and use independent
+judgment before making any financial decision.

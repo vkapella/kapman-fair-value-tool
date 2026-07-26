@@ -1,5 +1,59 @@
 const NEUTRAL_WEIGHT = 0.55;
 
+// Manual-only judgment defaults. These are deliberately conservative
+// placeholders, not provider facts: option 1 is the second-best choice in
+// both fields. The server seeds only missing/null manual values, leaving every
+// operator selection untouched.
+export const DEFAULT_JUDGMENT_OVERRIDES = {
+  growthFundingQuality: 1,
+  moatDurability: 1,
+};
+
+// Keep scoring weights inspectable and testable instead of burying numeric
+// literals inside suggestScore. Derived components (pctIV and debtVsCash) are
+// included here even though they are not stored factor keys.
+export const SCORE_WEIGHTS = {
+  valuation: {
+    pctIV: 0.5,
+    trailingPE: 0.15,
+    forwardPE: 0.1,
+    priceToBook: 0.15,
+    debtToEquity: 0.05,
+    currentRatio: 0.05,
+  },
+  growthScore: {
+    epsGrowthRate: 0.3,
+    revenueGrowth: 0.22,
+    freeCashflow: 0.13,
+    debtVsCash: 0.13,
+    growthConsistency: 0.1,
+    growthFundingQuality: 0.12,
+  },
+  moat: {
+    returnOnEquity: 0.22,
+    grossMargins: 0.18,
+    operatingMargins: 0.18,
+    profitMargins: 0.12,
+    returnOnAssets: 0.12,
+    moatType: 0.09,
+    moatDurability: 0.09,
+  },
+  executionRisk: {
+    managementQuality: 0.35,
+    capitalAllocation: 0.25,
+    insidersPercentHeld: 0.15,
+    institutionsPercentHeld: 0.1,
+    shortPercentOfFloat: 0.15,
+  },
+  economy: {
+    beta: 0.2,
+    rateEnvironment: 0.2,
+    industryTailwind: 0.25,
+    regulatoryRisk: 0.2,
+    dividendYield: 0.15,
+  },
+};
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -122,9 +176,11 @@ export const RUBRIC_DEF = {
     quantitativeFields: [
       { key: "beta", label: "Beta", format: "number", description: "Beta — sensitivity of the stock's returns to market movements; above 1.5 signals high cyclicality, below 0.8 suggests defensive characteristics" },
       { key: "dividendYield", label: "Dividend yield", format: "percent", description: "Dividend yield — Graham required 20 or more years of uninterrupted dividends as a quality filter; yield also signals cash generation discipline" },
-      { key: "fiftyTwoWeekHigh", label: "52-week high", format: "currency", description: "52-week high — context for where current price sits in the recent range" },
-      { key: "fiftyTwoWeekLow", label: "52-week low", format: "currency", description: "52-week low — distance from trough signals cyclical positioning" },
+      // Context-only until a defensible sector-relative model exists; arbitrary
+      // "good sector" rankings do not belong in the current single-formula score.
       { key: "sector", label: "Sector", format: "text", description: "Sector — used to calibrate industry cyclicality and regulatory exposure" },
+      // Context-only for the same reason as sector. Display and persist it, but
+      // do not turn a free-text industry label into an unsupported numeric score.
       { key: "industry", label: "Industry", format: "text", description: "Industry — provides context for competitive dynamics and secular growth or decline" },
     ],
     qualitativeFields: [
@@ -138,6 +194,7 @@ export const RUBRIC_DEF = {
 export function suggestScore(category, fundamentals, pctIV, globals, overrides = {}) {
   const def = RUBRIC_DEF[category];
   if (!def) return { suggested: 0, breakdown: [] };
+  const weights = SCORE_WEIGHTS[category];
 
   const all = { ...(fundamentals || {}) };
   if (all.epsGrowthRate == null && globals?.epsGrowthRate != null) all.epsGrowthRate = globals.epsGrowthRate;
@@ -153,44 +210,53 @@ export function suggestScore(category, fundamentals, pctIV, globals, overrides =
   };
 
   if (category === "valuation") {
-    push("pctIV", "% of intrinsic value", 0.5, (v) => (v < 70 ? 1 : v <= 90 ? 0.8 : v <= 110 ? 0.6 : v <= 130 ? 0.35 : 0.1), pctIV);
-    push("trailingPE", "Trailing P/E", 0.15, (v) => (v < 12 ? 1 : v <= 15 ? 0.8 : v <= 20 ? 0.6 : v <= 25 ? 0.35 : 0.1), all.trailingPE);
-    push("forwardPE", "Forward P/E", 0.1, (v) => (v < 12 ? 1 : v <= 15 ? 0.8 : v <= 20 ? 0.6 : v <= 25 ? 0.35 : 0.1), all.forwardPE);
-    push("priceToBook", "Price to book", 0.15, (v) => (v < 1.2 ? 1 : v <= 1.5 ? 0.8 : v <= 3 ? 0.6 : v <= 5 ? 0.35 : 0.1), all.priceToBook);
-    push("debtToEquity", "Debt to equity", 0.05, (v) => (v < 0.5 ? 1 : v <= 1 ? 0.8 : v <= 1.5 ? 0.6 : v <= 2 ? 0.35 : 0.1), all.debtToEquity);
-    push("currentRatio", "Current ratio", 0.05, (v) => (v > 2 ? 1 : v >= 1.5 ? 0.8 : v >= 1 ? 0.6 : v >= 0.5 ? 0.35 : 0.1), all.currentRatio);
+    push("pctIV", "% of intrinsic value", weights.pctIV, (v) => (v < 70 ? 1 : v <= 90 ? 0.8 : v <= 110 ? 0.6 : v <= 130 ? 0.35 : 0.1), pctIV);
+    push("trailingPE", "Trailing P/E", weights.trailingPE, (v) => (v < 12 ? 1 : v <= 15 ? 0.8 : v <= 20 ? 0.6 : v <= 25 ? 0.35 : 0.1), all.trailingPE);
+    push("forwardPE", "Forward P/E", weights.forwardPE, (v) => (v < 12 ? 1 : v <= 15 ? 0.8 : v <= 20 ? 0.6 : v <= 25 ? 0.35 : 0.1), all.forwardPE);
+    push("priceToBook", "Price to book", weights.priceToBook, (v) => (v < 1.2 ? 1 : v <= 1.5 ? 0.8 : v <= 3 ? 0.6 : v <= 5 ? 0.35 : 0.1), all.priceToBook);
+    push("debtToEquity", "Debt to equity", weights.debtToEquity, (v) => (v < 0.5 ? 1 : v <= 1 ? 0.8 : v <= 1.5 ? 0.6 : v <= 2 ? 0.35 : 0.1), all.debtToEquity);
+    push("currentRatio", "Current ratio", weights.currentRatio, (v) => (v > 2 ? 1 : v >= 1.5 ? 0.8 : v >= 1 ? 0.6 : v >= 0.5 ? 0.35 : 0.1), all.currentRatio);
   }
 
   if (category === "growthScore") {
     const growthEval = (v) => (v > 0.2 ? 1 : v >= 0.15 ? 0.85 : v >= 0.1 ? 0.65 : v >= 0.05 ? 0.4 : 0.15);
-    push("epsGrowthRate", "EPS growth rate", 0.35, growthEval, all.epsGrowthRate);
-    push("revenueGrowth", "Revenue growth", 0.25, growthEval, all.revenueGrowth);
-    push("freeCashflow", "Free cash flow", 0.15, (v) => (v > 0 ? 0.9 : 0.1), all.freeCashflow);
-    push("debtVsCash", "Debt vs cash", 0.15, (v) => (v < 0.5 ? 1 : v <= 1 ? 0.8 : v <= 2 ? 0.55 : v <= 4 ? 0.3 : 0.1), (all.totalDebt != null && all.totalCash ? all.totalDebt / all.totalCash : null));
-    push("growthConsistency", "EPS consistency", 0.1, (v) => byIndex(v, { 0: 1, 1: 0.8, 2: 0.6, 3: 0.3, 4: 0.1 }), overrides.growthConsistency);
+    push("epsGrowthRate", "EPS growth rate", weights.epsGrowthRate, growthEval, all.epsGrowthRate);
+    push("revenueGrowth", "Revenue growth", weights.revenueGrowth, growthEval, all.revenueGrowth);
+    push("freeCashflow", "Free cash flow", weights.freeCashflow, (v) => (v > 0 ? 0.9 : 0.1), all.freeCashflow);
+    push("debtVsCash", "Debt vs cash", weights.debtVsCash, (v) => (v < 0.5 ? 1 : v <= 1 ? 0.8 : v <= 2 ? 0.55 : v <= 4 ? 0.3 : 0.1), (all.totalDebt != null && all.totalCash ? all.totalDebt / all.totalCash : null));
+    push("growthConsistency", "EPS consistency", weights.growthConsistency, (v) => byIndex(v, { 0: 1, 1: 0.8, 2: 0.6, 3: 0.3, 4: 0.1 }), overrides.growthConsistency);
+    push("growthFundingQuality", "Earnings quality", weights.growthFundingQuality, (v) => byIndex(v, { 0: 1, 1: 0.8, 2: 0.6, 3: 0.35, 4: 0.1 }), overrides.growthFundingQuality);
   }
 
   if (category === "moat") {
-    push("returnOnEquity", "Return on equity", 0.3, (v) => (v > 0.25 ? 1 : v >= 0.2 ? 0.85 : v >= 0.15 ? 0.65 : v >= 0.1 ? 0.4 : 0.15), all.returnOnEquity);
-    push("grossMargins", "Gross margin", 0.25, (v) => (v > 0.6 ? 1 : v >= 0.4 ? 0.85 : v >= 0.25 ? 0.65 : v >= 0.1 ? 0.4 : 0.15), all.grossMargins);
-    push("operatingMargins", "Operating margin", 0.2, (v) => (v > 0.3 ? 1 : v >= 0.2 ? 0.85 : v >= 0.1 ? 0.65 : v >= 0.05 ? 0.4 : 0.15), all.operatingMargins);
-    push("returnOnAssets", "Return on assets", 0.15, (v) => (v > 0.15 ? 1 : v >= 0.1 ? 0.85 : v >= 0.07 ? 0.65 : v >= 0.03 ? 0.4 : 0.15), all.returnOnAssets);
-    push("moatType", "Moat type", 0.1, (v) => byIndex(v, { 0: 1, 1: 0.9, 2: 0.85, 3: 0.8, 4: 0.7, 5: 0.75, 6: 0.15 }), overrides.moatType);
+    push("returnOnEquity", "Return on equity", weights.returnOnEquity, (v) => (v > 0.25 ? 1 : v >= 0.2 ? 0.85 : v >= 0.15 ? 0.65 : v >= 0.1 ? 0.4 : 0.15), all.returnOnEquity);
+    push("grossMargins", "Gross margin", weights.grossMargins, (v) => (v > 0.6 ? 1 : v >= 0.4 ? 0.85 : v >= 0.25 ? 0.65 : v >= 0.1 ? 0.4 : 0.15), all.grossMargins);
+    push("operatingMargins", "Operating margin", weights.operatingMargins, (v) => (v > 0.3 ? 1 : v >= 0.2 ? 0.85 : v >= 0.1 ? 0.65 : v >= 0.05 ? 0.4 : 0.15), all.operatingMargins);
+    push("profitMargins", "Net profit margin", weights.profitMargins, (v) => (v > 0.25 ? 1 : v >= 0.15 ? 0.85 : v >= 0.1 ? 0.65 : v >= 0.05 ? 0.4 : 0.15), all.profitMargins);
+    push("returnOnAssets", "Return on assets", weights.returnOnAssets, (v) => (v > 0.15 ? 1 : v >= 0.1 ? 0.85 : v >= 0.07 ? 0.65 : v >= 0.03 ? 0.4 : 0.15), all.returnOnAssets);
+    push("moatType", "Moat type", weights.moatType, (v) => byIndex(v, { 0: 1, 1: 0.9, 2: 0.85, 3: 0.8, 4: 0.7, 5: 0.75, 6: 0.15 }), overrides.moatType);
+    push("moatDurability", "Moat trajectory", weights.moatDurability, (v) => byIndex(v, { 0: 1, 1: 0.85, 2: 0.6, 3: 0.3, 4: 0.05 }), overrides.moatDurability);
   }
 
   if (category === "executionRisk") {
-    push("managementQuality", "Management quality", 0.4, (v) => byIndex(v, { 0: 1, 1: 0.8, 2: 0.6, 3: 0.35, 4: 0.1 }), overrides.managementQuality);
-    push("capitalAllocation", "Capital allocation", 0.3, (v) => byIndex(v, { 0: 1, 1: 0.8, 2: 0.6, 3: 0.35, 4: 0.1 }), overrides.capitalAllocation);
-    push("insidersPercentHeld", "Insider ownership", 0.15, (v) => (v > 0.2 ? 1 : v >= 0.1 ? 0.8 : v >= 0.05 ? 0.6 : v >= 0.01 ? 0.4 : 0.2), all.insidersPercentHeld);
-    push("shortPercentOfFloat", "Short percent of float", 0.15, (v) => (v < 0.02 ? 1 : v <= 0.05 ? 0.8 : v <= 0.1 ? 0.6 : v <= 0.2 ? 0.35 : 0.1), all.shortPercentOfFloat);
+    push("managementQuality", "Management quality", weights.managementQuality, (v) => byIndex(v, { 0: 1, 1: 0.8, 2: 0.6, 3: 0.35, 4: 0.1 }), overrides.managementQuality);
+    push("capitalAllocation", "Capital allocation", weights.capitalAllocation, (v) => byIndex(v, { 0: 1, 1: 0.8, 2: 0.6, 3: 0.35, 4: 0.1 }), overrides.capitalAllocation);
+    push("insidersPercentHeld", "Insider ownership", weights.insidersPercentHeld, (v) => (v > 0.2 ? 1 : v >= 0.1 ? 0.8 : v >= 0.05 ? 0.6 : v >= 0.01 ? 0.4 : 0.2), all.insidersPercentHeld);
+    push("institutionsPercentHeld", "Institutional ownership", weights.institutionsPercentHeld, (v) => (
+      v >= 0.35 && v <= 0.75 ? 1
+      : (v >= 0.2 && v < 0.35) || (v > 0.75 && v <= 0.9) ? 0.75
+      : v > 0.9 ? 0.35
+      : 0.4
+    ), all.institutionsPercentHeld);
+    push("shortPercentOfFloat", "Short percent of float", weights.shortPercentOfFloat, (v) => (v < 0.02 ? 1 : v <= 0.05 ? 0.8 : v <= 0.1 ? 0.6 : v <= 0.2 ? 0.35 : 0.1), all.shortPercentOfFloat);
   }
 
   if (category === "economy") {
-    push("beta", "Beta", 0.2, (v) => (v < 0.6 ? 1 : v <= 0.9 ? 0.85 : v <= 1.2 ? 0.65 : v <= 1.6 ? 0.4 : 0.15), all.beta);
-    push("rateEnvironment", "Rate environment", 0.2, (v) => byIndex(v, { 0: 1, 1: 0.75, 2: 0.45, 3: 0.6, 4: 0.4 }), overrides.rateEnvironment);
-    push("industryTailwind", "Industry tailwind", 0.25, (v) => byIndex(v, { 0: 1, 1: 0.8, 2: 0.6, 3: 0.35, 4: 0.1 }), overrides.industryTailwind);
-    push("regulatoryRisk", "Regulatory risk", 0.2, (v) => byIndex(v, { 0: 1, 1: 0.8, 2: 0.6, 3: 0.35, 4: 0.1 }), overrides.regulatoryRisk);
-    push("dividendYield", "Dividend yield", 0.15, (v) => (v > 0.03 ? 1 : v >= 0.01 ? 0.75 : v > 0 ? 0.5 : 0.4), all.dividendYield);
+    push("beta", "Beta", weights.beta, (v) => (v < 0.6 ? 1 : v <= 0.9 ? 0.85 : v <= 1.2 ? 0.65 : v <= 1.6 ? 0.4 : 0.15), all.beta);
+    push("rateEnvironment", "Rate environment", weights.rateEnvironment, (v) => byIndex(v, { 0: 1, 1: 0.75, 2: 0.45, 3: 0.6, 4: 0.4 }), overrides.rateEnvironment);
+    push("industryTailwind", "Industry tailwind", weights.industryTailwind, (v) => byIndex(v, { 0: 1, 1: 0.8, 2: 0.6, 3: 0.35, 4: 0.1 }), overrides.industryTailwind);
+    push("regulatoryRisk", "Regulatory risk", weights.regulatoryRisk, (v) => byIndex(v, { 0: 1, 1: 0.8, 2: 0.6, 3: 0.35, 4: 0.1 }), overrides.regulatoryRisk);
+    push("dividendYield", "Dividend yield", weights.dividendYield, (v) => (v > 0.03 ? 1 : v >= 0.01 ? 0.75 : v > 0 ? 0.5 : 0.4), all.dividendYield);
   }
 
   const weightedScore = metrics.reduce((sum, item) => sum + (item.score * item.weight), 0);

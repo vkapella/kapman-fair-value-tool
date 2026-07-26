@@ -6,7 +6,7 @@ import YahooFinance from "yahoo-finance2";
 import { fileURLToPath } from "url";
 import { DEFAULT_GLOBALS, SEED_STOCKS } from "../src/lib/defaultData.js";
 import { calcIV, calcPctIV, calcScore, allocationSignals } from "../src/lib/valuation.js";
-import { CATEGORY_KEYS, FACTOR_INDEX } from "../src/lib/rubric.js";
+import { CATEGORY_KEYS, DEFAULT_JUDGMENT_OVERRIDES, FACTOR_INDEX } from "../src/lib/rubric.js";
 import { fetchFundamentalsBatch, finnhubConfigured } from "./lib/finnhub.js";
 import { computeScores, coerceFactorValue } from "./lib/scoring.js";
 import { parseSheet } from "./lib/sheet.js";
@@ -427,6 +427,43 @@ const upsertFactorManual = db.prepare(`
   ON CONFLICT (ticker, factor_key) DO UPDATE SET manual_value = excluded.manual_value, updated = excluded.updated
 `);
 
+const getFactorManual = db.prepare(
+  "SELECT manual_value FROM stock_factors WHERE ticker = ? AND factor_key = ?"
+);
+
+// Seed only missing/null manual judgments. Option index 1 is a deliberately
+// conservative placeholder for the two provider-unavailable fields; an
+// operator's existing selection always wins, and rerunning this is a no-op.
+function seedDefaultJudgmentsForTicker(ticker, now = new Date().toISOString()) {
+  let seeded = 0;
+  for (const [factorKey, value] of Object.entries(DEFAULT_JUDGMENT_OVERRIDES)) {
+    const existing = getFactorManual.get(ticker, factorKey);
+    if (existing && existing.manual_value != null) continue;
+    const info = FACTOR_INDEX[factorKey];
+    upsertFactorManual.run({
+      ticker,
+      factorKey,
+      category: info.category,
+      kind: info.kind,
+      manualValue: String(value),
+      updated: now,
+    });
+    seeded++;
+  }
+  return seeded;
+}
+
+const defaultJudgmentSeed = db.transaction(() => {
+  const now = new Date().toISOString();
+  return getStocks().reduce(
+    (count, stock) => count + seedDefaultJudgmentsForTicker(stock.ticker, now),
+    0
+  );
+})();
+if (defaultJudgmentSeed > 0) {
+  console.log(`default manual judgments seeded (${defaultJudgmentSeed} factor value(s))`);
+}
+
 // Only touches the fetched_value/fetched_at columns -- never clobbers an
 // operator's manual_value when a provider refresh runs.
 const upsertFactorFetched = db.prepare(`
@@ -656,6 +693,7 @@ app.post("/api/stocks", handleRoute((req, res) => {
     curatedScores: JSON.stringify(Object.fromEntries(CATEGORY_KEYS.map((c) => [c, stock[c]]))),
     position: nextPosition,
   });
+  seedDefaultJudgmentsForTicker(stock.ticker);
   res.status(201).json(getStockByTicker(stock.ticker));
 }));
 
@@ -1188,6 +1226,7 @@ app.post("/api/import/apply", async (req, res) => {
             curatedScores: JSON.stringify(Object.fromEntries(CATEGORY_KEYS.map((c) => [c, stock[c]]))),
             position: nextPosition,
           });
+          seedDefaultJudgmentsForTicker(stock.ticker, now);
           for (const field of MERGE_FIELDS) {
             if (stock[field] != null) upsertBaselineField.run({ ticker: stock.ticker, field, value: String(stock[field]), importedAt: now, source });
           }

@@ -5,6 +5,7 @@ import path from "path";
 import YahooFinance from "yahoo-finance2";
 import { fileURLToPath } from "url";
 import { DEFAULT_GLOBALS, SEED_STOCKS } from "../src/lib/defaultData.js";
+import { calcIV, calcPctIV, calcScore, allocationSignals } from "../src/lib/valuation.js";
 import { fetchFundamentalsBatch, finnhubConfigured } from "./lib/finnhub.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -65,6 +66,20 @@ db.exec(`
     growth_multiplier REAL NOT NULL,
     avg_yield_aaa REAL NOT NULL,
     bond_yield REAL NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS snapshot_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    taken_at TEXT NOT NULL,
+    schema_version INTEGER NOT NULL,
+    globals TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS snapshot_rows (
+    run_id INTEGER NOT NULL REFERENCES snapshot_runs(id),
+    ticker TEXT NOT NULL,
+    data TEXT NOT NULL,
+    PRIMARY KEY (run_id, ticker)
   );
 `);
 
@@ -343,22 +358,16 @@ app.post("/api/prices", async (req, res) => {
   }
 });
 
-// API: fetch enriched quote data. Finnhub (keyed, stable) is the primary
-// fundamentals source; Yahoo back-fills only the fields Finnhub's free tier
-// lacks (ownership, short interest, cash/debt/FCF levels, forward EPS).
-app.post("/api/quotes", async (req, res) => {
-  const { tickers } = req.body || {};
-  if (!Array.isArray(tickers) || tickers.length === 0) {
-    return res.status(400).json({ error: "tickers must be a non-empty array" });
-  }
+// Enriched quote data. Finnhub (keyed, stable) is the primary fundamentals
+// source; Yahoo back-fills only the fields Finnhub's free tier lacks
+// (ownership, short interest, cash/debt/FCF levels, forward EPS). Shared by
+// POST /api/quotes and POST /api/snapshot.
+async function buildQuoteMap(normalized) {
+  const finnhubByTicker = finnhubConfigured() ? await fetchFundamentalsBatch(normalized) : {};
 
-  try {
-    const normalized = [...new Set(tickers.map((raw) => String(raw || "").trim().toUpperCase()).filter(Boolean))];
-    const finnhubByTicker = finnhubConfigured() ? await fetchFundamentalsBatch(normalized) : {};
-
-    const result = {};
-    await Promise.all(
-      normalized.map(async (t) => {
+  const result = {};
+  await Promise.all(
+    normalized.map(async (t) => {
         const yahooSymbol = yahooSymbolFromTicker(t);
         try {
           const [quote, summary] = await Promise.all([
@@ -420,11 +429,108 @@ app.post("/api/quotes", async (req, res) => {
         }
       })
     );
-    res.json(result);
+  return result;
+}
+
+app.post("/api/quotes", async (req, res) => {
+  const { tickers } = req.body || {};
+  if (!Array.isArray(tickers) || tickers.length === 0) {
+    return res.status(400).json({ error: "tickers must be a non-empty array" });
+  }
+
+  try {
+    const normalized = [...new Set(tickers.map((raw) => String(raw || "").trim().toUpperCase()).filter(Boolean))];
+    res.json(await buildQuoteMap(normalized));
   } catch (error) {
     res.status(500).json({ error: error?.message || "internal server error" });
   }
 });
+
+const SNAPSHOT_SCHEMA_VERSION = 1;
+
+const insertSnapshot = db.transaction((payload) => {
+  const runId = db.prepare(
+    "INSERT INTO snapshot_runs (taken_at, schema_version, globals) VALUES (?, ?, ?)"
+  ).run(payload.takenAt, payload.schemaVersion, JSON.stringify(payload.globals)).lastInsertRowid;
+  const insertRow = db.prepare("INSERT INTO snapshot_rows (run_id, ticker, data) VALUES (?, ?, ?)");
+  for (const stock of payload.stocks) insertRow.run(runId, stock.ticker, JSON.stringify(stock));
+  return runId;
+});
+
+// Freeze the model's current state: curated inputs (EPS, growth, scores) from
+// the DB, live price and fundamentals from the providers, IV/%IV/signals
+// computed with the shared formulas. Append-only — snapshots never mutate the
+// stocks table, and later model changes never rewrite old rows.
+app.post("/api/snapshot", async (req, res) => {
+  try {
+    const stocks = getStocks();
+    if (stocks.length === 0) return res.status(400).json({ error: "no stocks to snapshot" });
+    const globals = getGlobals();
+    const quoteMap = await buildQuoteMap(stocks.map((s) => s.ticker));
+
+    const rows = stocks.map((s) => {
+      const quote = quoteMap[s.ticker] || null;
+      const currentPrice = quote?.currentPrice ?? quote?.previousClose ?? s.currentPrice;
+      const iv = calcIV(s.ttmEPS, s.growth, globals);
+      const pctIV = calcPctIV(currentPrice, iv);
+      const score = calcScore(s);
+      return {
+        ...s,
+        currentPrice,
+        priceSource: quote?.currentPrice != null ? "live" : quote?.previousClose != null ? "previousClose" : "stored",
+        iv,
+        pctIV,
+        score,
+        signals: allocationSignals(s, iv, pctIV, score),
+        quote: quote ? {
+          trailingEps: quote.trailingEps,
+          forwardEps: quote.forwardEps,
+          epsGrowthRate: quote.epsGrowthRate,
+          quoteType: quote.quoteType,
+          longName: quote.longName,
+        } : null,
+        fundamentals: quote?.fundamentals ?? null,
+      };
+    });
+
+    const payload = {
+      schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+      source: "kapman-fair-value-tool",
+      takenAt: new Date().toISOString(),
+      globals,
+      stocks: rows,
+    };
+    const runId = insertSnapshot(payload);
+    res.status(201).json({ runId, ...payload });
+  } catch (error) {
+    res.status(500).json({ error: error?.message || "internal server error" });
+  }
+});
+
+app.get("/api/snapshots", handleRoute((req, res) => {
+  const runs = db.prepare(`
+    SELECT r.id, r.taken_at, r.schema_version, COUNT(sr.ticker) AS tickers
+    FROM snapshot_runs r LEFT JOIN snapshot_rows sr ON sr.run_id = r.id
+    GROUP BY r.id ORDER BY r.id DESC
+  `).all();
+  res.json(runs.map((r) => ({ runId: r.id, takenAt: r.taken_at, schemaVersion: r.schema_version, tickers: r.tickers })));
+}));
+
+app.get("/api/snapshots/:id", handleRoute((req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) throw apiError(400, "snapshot id must be a positive integer");
+  const run = db.prepare("SELECT id, taken_at, schema_version, globals FROM snapshot_runs WHERE id = ?").get(id);
+  if (!run) throw apiError(404, `snapshot ${id} not found`);
+  const rows = db.prepare("SELECT data FROM snapshot_rows WHERE run_id = ? ORDER BY ticker ASC").all(id);
+  res.json({
+    runId: run.id,
+    schemaVersion: run.schema_version,
+    source: "kapman-fair-value-tool",
+    takenAt: run.taken_at,
+    globals: JSON.parse(run.globals),
+    stocks: rows.map((r) => JSON.parse(r.data)),
+  });
+}));
 
 // Serve built frontend. Vite assets are content-hashed -> cache forever;
 // index.html must never be cached or browsers keep running stale app code

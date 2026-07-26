@@ -1,25 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { TrendingUp, Plus, Trash2, RefreshCw, Calculator, Target, Settings } from "lucide-react";
+import { TrendingUp, Plus, Trash2, RefreshCw, Calculator, Target, Settings, Camera } from "lucide-react";
 import { DEFAULT_GLOBALS, SEED_STOCKS } from "./lib/defaultData.js";
 import { RUBRIC_DEF, suggestScore } from "./lib/rubric.js";
-
-const calcIV = (eps, growth, g) => eps * (g.peNoGrowth + g.g * growth) * (g.avgYieldAAA / g.bondYield);
-const calcPctIV = (price, iv) => (iv > 0 ? (price / iv) * 100 : 0);
-const calcScore = (s) => (s.valuation || 0) + (s.growthScore || 0) + (s.moat || 0) + (s.executionRisk || 0) + (s.economy || 0);
-
-const allocationSignals = (s, iv, pctIV, score) => {
-  const buyShares = score >= 75 && pctIV < 110;
-  const buySharesPct = !buyShares ? null
-    : score >= 80 && pctIV < 95 ? Math.min(5, Math.round((100 - pctIV) / 8))
-    : score >= 75 && pctIV < 105 ? 2 : 1;
-  const sellPuts = score >= 75 && pctIV < 100;
-  const sellPutsNote = sellPuts
-    ? pctIV < 85 ? "10% AV | 2yr 10% below"
-    : pctIV < 95 ? "5% AV | 2yr 15% below" : "ON RADAR" : "no";
-  const buyCalls = score >= 75 && pctIV < 92;
-  const buyCallsNote = buyCalls ? (pctIV < 80 ? "3% | 2yr 1% above" : "ON RADAR") : "no";
-  return { buyShares, buySharesPct, sellPutsNote, buyCallsNote };
-};
+import { calcIV, calcPctIV, calcScore, allocationSignals } from "./lib/valuation.js";
 
 const fmtMoney = (n) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -121,6 +104,7 @@ export default function App() {
   const [sortDir, setSortDir] = useState("desc");
   const [storageStatus, setStorageStatus] = useState("loading");
   const [refreshing, setRefreshing] = useState(false);
+  const [snapshotting, setSnapshotting] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState("");
   const [yahooData, setYahooData] = useState({});
   const [showSettings, setShowSettings] = useState(false);
@@ -332,6 +316,29 @@ export default function App() {
     }
   };
 
+  // Freeze the model's current state server-side (append-only snapshot table)
+  // and put the full JSON payload on the clipboard for pasting into the KB.
+  const takeSnapshot = async () => {
+    setSnapshotting(true);
+    setRefreshMsg("Taking snapshot…");
+    try {
+      const payload = await apiRequest("/api/snapshot", { method: "POST" });
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+        copied = true;
+      } catch (_) { /* clipboard unavailable — snapshot is still saved */ }
+      setRefreshMsg(
+        `Snapshot #${payload.runId} saved (${payload.stocks.length} tickers)${copied ? " · JSON copied to clipboard" : " · copy via GET /api/snapshots/" + payload.runId}`
+      );
+    } catch (e) {
+      setRefreshMsg(`Snapshot failed: ${e.message}`);
+    } finally {
+      setSnapshotting(false);
+      setTimeout(() => setRefreshMsg(""), 8000);
+    }
+  };
+
   const stats = useMemo(() => ({
     buyZone: rows.filter((r) => r.score >= 75 && r.pctIV < 100).length,
     overvalued: rows.filter((r) => r.pctIV >= 110).length,
@@ -405,6 +412,12 @@ export default function App() {
               <button onClick={() => setShowSettings((v) => !v)}
                 className="px-3 py-2 rounded border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900 text-xs flex items-center gap-2 transition">
                 <Settings className="w-3.5 h-3.5" /> Settings
+              </button>
+              <button onClick={takeSnapshot} disabled={snapshotting || refreshing || dataLoading || !!dataError}
+                title="Freeze today's model state (prices, EPS, scores, IV, signals, fundamentals) to the snapshot log and copy the JSON for the knowledge base"
+                className="px-3 py-2 rounded border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 text-xs flex items-center gap-2 transition disabled:opacity-60 font-medium">
+                <Camera className={`w-3.5 h-3.5 ${snapshotting ? "animate-pulse" : ""}`} />
+                {snapshotting ? "Snapshotting…" : "Snapshot + Copy JSON"}
               </button>
               <button onClick={refreshPrices} disabled={refreshing || dataLoading || !!dataError}
                 className="px-3 py-2 rounded bg-emerald-500 hover:bg-emerald-400 text-emerald-950 text-xs flex items-center gap-2 transition disabled:opacity-60 font-medium">

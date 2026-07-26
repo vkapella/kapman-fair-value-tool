@@ -160,3 +160,7 @@ Thumbs.db
 .data/
 *.sqlite
 *.sqlite-*
+
+# Brandon's IWB stock sheet exports — community/paid content, repo is public.
+# Stored locally for the import tooling; never commit.
+/data/sheets/

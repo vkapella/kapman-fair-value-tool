@@ -403,6 +403,11 @@ function normalizeFactorPatch(payload) {
       continue;
     }
     if (info.kind === "judgment") {
+      // Number("") is 0 -- without this guard an empty string silently books
+      // option 0, which is the highest-scoring choice in every list.
+      if (typeof rawValue === "string" && rawValue.trim() === "") {
+        throw apiError(400, `${key} must be an option index, not an empty string (send null to clear)`);
+      }
       const idx = Number(rawValue);
       const optionCount = info.options?.length || 0;
       if (!Number.isInteger(idx) || idx < 0 || idx >= optionCount) {

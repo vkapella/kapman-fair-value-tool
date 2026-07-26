@@ -39,6 +39,7 @@ const stockColumnByField = {
   economy: "economy",
   epsPinned: "eps_pinned",
   pinnedCategories: "pinned_categories",
+  curatedScores: "curated_scores",
 };
 
 const globalColumnByField = {
@@ -135,13 +136,33 @@ if (!db.prepare("PRAGMA table_info(stocks)").all().some((c) => c.name === "pinne
   })();
 }
 
+// Migration: curated_scores retains the operator's own number per category
+// even while that category is unpinned and showing the model's value. Without
+// it, unpinning is destructive -- the curated score is overwritten in place
+// the instant you release a category to "see what the model says", with no way
+// back. Seeded from the current score columns, which at migration time ARE the
+// curated values (every row is pinned by the migration above).
+if (!db.prepare("PRAGMA table_info(stocks)").all().some((c) => c.name === "curated_scores")) {
+  db.transaction(() => {
+    db.exec("ALTER TABLE stocks ADD COLUMN curated_scores TEXT NOT NULL DEFAULT '{}'");
+    const rows = db.prepare(`SELECT ticker, ${CATEGORY_KEYS.map((c) => stockColumnByField[c]).join(", ")} FROM stocks`).all();
+    const write = db.prepare("UPDATE stocks SET curated_scores = ? WHERE ticker = ?");
+    for (const row of rows) {
+      const curated = Object.fromEntries(CATEGORY_KEYS.map((c) => [c, row[stockColumnByField[c]]]));
+      write.run(JSON.stringify(curated), row.ticker);
+    }
+  })();
+}
+
 const insertStock = db.prepare(`
   INSERT INTO stocks (
     ticker, ttm_eps, growth, current_price, updated, valuation,
-    growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories, position
+    growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories,
+    curated_scores, position
   ) VALUES (
     @ticker, @ttmEPS, @growth, @currentPrice, @updated, @valuation,
-    @growthScore, @moat, @executionRisk, @economy, @epsPinned, @pinnedCategories, @position
+    @growthScore, @moat, @executionRisk, @economy, @epsPinned, @pinnedCategories,
+    @curatedScores, @position
   )
 `);
 
@@ -151,7 +172,13 @@ const seedDatabase = db.transaction(() => {
     // Seed data is curated the same way sheet-imported rows are (see the
     // pinned_categories migration above) -- pin everything so a stray
     // /api/quotes refresh on a fresh install can't recompute over it.
-    SEED_STOCKS.forEach((stock, index) => insertStock.run({ epsPinned: 0, pinnedCategories: CATEGORY_KEYS.join(","), ...stock, position: index }));
+    SEED_STOCKS.forEach((stock, index) => insertStock.run({
+      epsPinned: 0,
+      pinnedCategories: CATEGORY_KEYS.join(","),
+      ...stock,
+      curatedScores: JSON.stringify(Object.fromEntries(CATEGORY_KEYS.map((c) => [c, stock[c]]))),
+      position: index,
+    }));
   }
 
   const globalCount = db.prepare("SELECT COUNT(*) AS count FROM globals").get().count;
@@ -274,6 +301,7 @@ function stockFromRow(row) {
     economy: row.economy,
     epsPinned: Boolean(row.eps_pinned),
     pinnedCategories: row.pinned_categories ? row.pinned_categories.split(",").filter(Boolean) : [],
+    curatedScores: row.curated_scores ? JSON.parse(row.curated_scores) : {},
   };
 }
 
@@ -289,7 +317,7 @@ function globalsFromRow(row) {
 function getStocks() {
   return db.prepare(`
     SELECT ticker, ttm_eps, growth, current_price, updated, valuation,
-      growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories
+      growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories, curated_scores
     FROM stocks
     ORDER BY position ASC, ticker ASC
   `).all().map(stockFromRow);
@@ -307,7 +335,7 @@ function getGlobals() {
 function getStockByTicker(ticker) {
   const row = db.prepare(`
     SELECT ticker, ttm_eps, growth, current_price, updated, valuation,
-      growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories
+      growth_score, moat, execution_risk, economy, eps_pinned, pinned_categories, curated_scores
     FROM stocks
     WHERE ticker = ?
   `).get(ticker);
@@ -381,7 +409,15 @@ function recomputeScoresForTicker(ticker) {
 
   const patch = {};
   for (const category of CATEGORY_KEYS) {
-    if (!pinned.has(category)) patch[stockColumnByField[category]] = computed[category];
+    // A pinned category restores the operator's curated number rather than
+    // merely leaving the column alone: re-pinning after a look at the model
+    // must give back exactly what they had, not freeze the computed value.
+    if (pinned.has(category)) {
+      const curated = stock.curatedScores?.[category];
+      if (curated != null && curated !== stock[category]) patch[stockColumnByField[category]] = curated;
+    } else {
+      patch[stockColumnByField[category]] = computed[category];
+    }
   }
   if (Object.keys(patch).length > 0) {
     const assignments = Object.keys(patch).map((column) => `${column} = @${column}`);
@@ -493,7 +529,14 @@ app.post("/api/stocks", handleRoute((req, res) => {
   // unpinned made the next /api/quotes recompute silently replace them with
   // cold-start neutral values (a 78 import landed as 59, dropping the name out
   // of the buy zone). Curated by default; opt into the model by unpinning.
-  insertStock.run({ epsPinned: 0, pinnedCategories: CATEGORY_KEYS.join(","), ...stock, position: nextPosition });
+  insertStock.run({
+    epsPinned: 0,
+    pinnedCategories: CATEGORY_KEYS.join(","),
+    ...stock,
+    // The supplied scores ARE the curated ones (sheet import, manual add).
+    curatedScores: JSON.stringify(Object.fromEntries(CATEGORY_KEYS.map((c) => [c, stock[c]]))),
+    position: nextPosition,
+  });
   res.status(201).json(getStockByTicker(stock.ticker));
 }));
 
@@ -514,6 +557,17 @@ app.put("/api/stocks/:ticker", handleRoute((req, res) => {
   // (manual edit, importer) always send epsPinned alongside ttmEPS.
   if (current.epsPinned && patch.ttmEPS != null && patch.epsPinned == null) {
     throw apiError(409, `stock ${currentTicker} EPS is pinned (curated); include epsPinned to overwrite it`);
+  }
+
+  // A score arriving here is the operator typing a number, so it becomes the
+  // curated value of record for that category -- retained even if they later
+  // unpin to compare against the model, so re-pinning gives it back intact.
+  const editedCategories = CATEGORY_KEYS.filter((c) => patch[c] != null);
+  if (editedCategories.length > 0) {
+    patch.curatedScores = JSON.stringify({
+      ...current.curatedScores,
+      ...Object.fromEntries(editedCategories.map((c) => [c, patch[c]])),
+    });
   }
 
   const assignments = Object.keys(patch).map((field) => `${stockColumnByField[field]} = @${field}`);

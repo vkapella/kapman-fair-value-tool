@@ -57,6 +57,9 @@ function NumCell({ value, onChange, decimals = 2, max, suffix = "", width = "w-2
     if (isNaN(n)) n = 0;
     if (max != null) n = Math.min(n, max);
     if (n < 0) n = 0;
+    // No-op edits must not fire onChange: the EPS cell's handler pins the row
+    // and stamps the date, which a click-in/click-out must never do.
+    if (typeof value === "number" && n === value) return;
     onChange(n);
   };
   if (editing) {
@@ -158,7 +161,7 @@ export default function App() {
     const forwardEps = yahooData[s.ticker]?.forwardEps ?? null;
     const forwardPe = forwardEps > 0 ? s.currentPrice / forwardEps : null;
     const quote = yahooData[s.ticker];
-    const epsCurated = quote ? isFundQuote(quote) || quote.trailingEps == null : false;
+    const epsCurated = Boolean(s.epsPinned) || (quote ? isFundQuote(quote) || quote.trailingEps == null : false);
     return { ...s, pe, forwardEps, forwardPe, iv, pctIV, score, epsCurated, ...sig };
   }), [stocks, globals, yahooData]);
 
@@ -277,7 +280,9 @@ export default function App() {
         // `updated` moves only when the valuation denominator (EPS) refreshes.
         // A price-only refresh must keep the old date, or a row with frozen
         // EPS advertises itself as current while its IV drifts stale.
-        if (!isFundQuote(quote) && quote.trailingEps != null) {
+        // Pinned rows (sheet-curated EPS on a basis providers can't reproduce,
+        // e.g. BRK.B operating earnings) are price-only by design.
+        if (!stock.epsPinned && !isFundQuote(quote) && quote.trailingEps != null) {
           patch.ttmEPS = quote.trailingEps;
           patch.updated = today;
         }
@@ -830,13 +835,21 @@ function IntrinsicTable({ rows, updateStock, removeStock, stocks, globals, sortB
                   <td className="px-2 py-2 text-right">
                     <div className="flex items-center justify-end gap-1">
                       {r.epsCurated && (
-                        <span
-                          title="No provider EPS for this ticker — value is operator-maintained. Refresh updates price only and leaves the Updated date alone."
+                        <button
+                          onClick={() => {
+                            if (!r.epsPinned) return;
+                            if (window.confirm(`Unpin ${r.ticker} EPS? Future refreshes will overwrite it with provider-derived EPS.`)) {
+                              updateStock(idx, { epsPinned: false });
+                            }
+                          }}
+                          title={r.epsPinned
+                            ? "EPS is pinned (sheet/operator-curated) — refresh updates price only. Click to unpin and let refresh overwrite it."
+                            : "No provider EPS for this ticker — value is operator-maintained. Refresh updates price only and leaves the Updated date alone."}
                           className="text-[9px] uppercase tracking-wider font-mono px-1 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300">
-                          curated
-                        </span>
+                          {r.epsPinned ? "pinned" : "curated"}
+                        </button>
                       )}
-                      <NumCell value={r.ttmEPS} onChange={(v) => updateStock(idx, { ttmEPS: v, updated: todayShort() })} decimals={2} width="w-20" />
+                      <NumCell value={r.ttmEPS} onChange={(v) => updateStock(idx, { ttmEPS: v, updated: todayShort(), epsPinned: true })} decimals={2} width="w-20" />
                     </div>
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums font-mono text-xs text-zinc-300">

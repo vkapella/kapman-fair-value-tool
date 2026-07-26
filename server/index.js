@@ -15,8 +15,11 @@ const yahooFinance = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 const defaultDbDir = process.env.NODE_ENV === "production" ? "/data" : path.join(__dirname, "..", ".data");
 const DB_PATH = process.env.SQLITE_DB_PATH || path.join(defaultDbDir, "fair-value.sqlite");
 
-const STOCK_FIELDS = ["ticker", "ttmEPS", "growth", "currentPrice", "updated", "valuation", "growthScore", "moat", "executionRisk", "economy"];
+const STOCK_FIELDS = ["ticker", "ttmEPS", "growth", "currentPrice", "updated", "valuation", "growthScore", "moat", "executionRisk", "economy", "epsPinned"];
 const STOCK_FIELD_SET = new Set(STOCK_FIELDS);
+// epsPinned is optional everywhere (defaults to 0): operator/import curation
+// flag, not part of the core row contract.
+const REQUIRED_STOCK_FIELDS = STOCK_FIELDS.filter((field) => field !== "epsPinned");
 const NUMERIC_STOCK_FIELDS = new Set(["ttmEPS", "growth", "currentPrice", "valuation", "growthScore", "moat", "executionRisk", "economy"]);
 const GLOBAL_FIELDS = ["peNoGrowth", "g", "avgYieldAAA", "bondYield"];
 const GLOBAL_FIELD_SET = new Set(GLOBAL_FIELDS);
@@ -32,6 +35,7 @@ const stockColumnByField = {
   moat: "moat",
   executionRisk: "execution_risk",
   economy: "economy",
+  epsPinned: "eps_pinned",
 };
 
 const globalColumnByField = {
@@ -83,20 +87,27 @@ db.exec(`
   );
 `);
 
+// Migration: eps_pinned marks rows whose ttmEPS is operator/sheet-curated on a
+// basis providers cannot reproduce (ETFs, BRK.B operating earnings). Refresh
+// must never overwrite EPS on pinned rows.
+if (!db.prepare("PRAGMA table_info(stocks)").all().some((c) => c.name === "eps_pinned")) {
+  db.exec("ALTER TABLE stocks ADD COLUMN eps_pinned INTEGER NOT NULL DEFAULT 0");
+}
+
 const insertStock = db.prepare(`
   INSERT INTO stocks (
     ticker, ttm_eps, growth, current_price, updated, valuation,
-    growth_score, moat, execution_risk, economy, position
+    growth_score, moat, execution_risk, economy, eps_pinned, position
   ) VALUES (
     @ticker, @ttmEPS, @growth, @currentPrice, @updated, @valuation,
-    @growthScore, @moat, @executionRisk, @economy, @position
+    @growthScore, @moat, @executionRisk, @economy, @epsPinned, @position
   )
 `);
 
 const seedDatabase = db.transaction(() => {
   const stockCount = db.prepare("SELECT COUNT(*) AS count FROM stocks").get().count;
   if (stockCount === 0) {
-    SEED_STOCKS.forEach((stock, index) => insertStock.run({ ...stock, position: index }));
+    SEED_STOCKS.forEach((stock, index) => insertStock.run({ epsPinned: 0, ...stock, position: index }));
   }
 
   const globalCount = db.prepare("SELECT COUNT(*) AS count FROM globals").get().count;
@@ -153,7 +164,7 @@ function normalizeStockPayload(payload, { partial = false } = {}) {
   assertKnownFields(payload, STOCK_FIELD_SET);
 
   if (!partial) {
-    const missing = STOCK_FIELDS.filter((field) => payload[field] == null);
+    const missing = REQUIRED_STOCK_FIELDS.filter((field) => payload[field] == null);
     if (missing.length > 0) throw apiError(400, `missing required field(s): ${missing.join(", ")}`);
   }
 
@@ -162,6 +173,11 @@ function normalizeStockPayload(payload, { partial = false } = {}) {
   if (payload.updated != null) {
     if (typeof payload.updated !== "string") throw apiError(400, "updated must be a string");
     stock.updated = payload.updated.trim();
+  }
+  if (payload.epsPinned != null) {
+    if (payload.epsPinned === true || payload.epsPinned === 1) stock.epsPinned = 1;
+    else if (payload.epsPinned === false || payload.epsPinned === 0) stock.epsPinned = 0;
+    else throw apiError(400, "epsPinned must be a boolean");
   }
   for (const field of NUMERIC_STOCK_FIELDS) {
     if (payload[field] != null) stock[field] = normalizeFiniteNumber(payload[field], field);
@@ -195,6 +211,7 @@ function stockFromRow(row) {
     moat: row.moat,
     executionRisk: row.execution_risk,
     economy: row.economy,
+    epsPinned: Boolean(row.eps_pinned),
   };
 }
 
@@ -210,7 +227,7 @@ function globalsFromRow(row) {
 function getStocks() {
   return db.prepare(`
     SELECT ticker, ttm_eps, growth, current_price, updated, valuation,
-      growth_score, moat, execution_risk, economy
+      growth_score, moat, execution_risk, economy, eps_pinned
     FROM stocks
     ORDER BY position ASC, ticker ASC
   `).all().map(stockFromRow);
@@ -228,7 +245,7 @@ function getGlobals() {
 function getStockByTicker(ticker) {
   const row = db.prepare(`
     SELECT ticker, ttm_eps, growth, current_price, updated, valuation,
-      growth_score, moat, execution_risk, economy
+      growth_score, moat, execution_risk, economy, eps_pinned
     FROM stocks
     WHERE ticker = ?
   `).get(ticker);
@@ -290,7 +307,7 @@ app.post("/api/stocks", handleRoute((req, res) => {
   if (getStockByTicker(stock.ticker)) throw apiError(409, `stock ${stock.ticker} already exists`);
 
   const nextPosition = db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS position FROM stocks").get().position;
-  insertStock.run({ ...stock, position: nextPosition });
+  insertStock.run({ epsPinned: 0, ...stock, position: nextPosition });
   res.status(201).json(getStockByTicker(stock.ticker));
 }));
 
@@ -303,6 +320,14 @@ app.put("/api/stocks/:ticker", handleRoute((req, res) => {
   const nextTicker = patch.ticker || currentTicker;
   if (nextTicker !== currentTicker && getStockByTicker(nextTicker)) {
     throw apiError(409, `stock ${nextTicker} already exists`);
+  }
+
+  // Pin invariant is enforced HERE, not in the SPA: a stale browser session
+  // (loaded before rows were pinned) still refreshes with epsPinned=false in
+  // memory and would silently clobber curated EPS. Intentional writers
+  // (manual edit, importer) always send epsPinned alongside ttmEPS.
+  if (current.epsPinned && patch.ttmEPS != null && patch.epsPinned == null) {
+    throw apiError(409, `stock ${currentTicker} EPS is pinned (curated); include epsPinned to overwrite it`);
   }
 
   const assignments = Object.keys(patch).map((field) => `${stockColumnByField[field]} = @${field}`);

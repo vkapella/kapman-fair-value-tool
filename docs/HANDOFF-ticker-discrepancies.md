@@ -11,6 +11,18 @@
 > against live providers. Remaining: items 3 (sheet import — also fixes prod's
 > already-lying QQQ/VOO dates) and 4 (promote `economy` to a global).
 
+> **Status 7/26/26 (later):** Deployed. Snapshot feature added (POST
+> /api/snapshot + GET /api/snapshots[/:id], header button copies JSON for the
+> KB). Item 3 executed: fresh sheet export lives in `data/sheets/` (git-ignored
+> — public repo), `scripts/import-sheet.py` syncs EPS/growth/scores/economy/
+> dates from it and pins imported EPS via the new `eps_pinned` column so
+> refresh can never overwrite sheet-basis EPS (the BRK.B finding: Finnhub
+> derives 37.22 GAAP-ish vs Brandon's 21.41 operating basis — a 60%-of-IV
+> mirage). Sheet's economy=22 everywhere, so item 4's cheap form ships with the
+> import; promoting economy to a true global remains open, folded into the
+> Phase A redesign (persisted constituent fields, category tabs, computed-but-
+> overridable scores).
+
 Context for continuing this work in a local Claude Code session.
 Investigation was done in a cloud session that could not reach prod
 (`kapman-fair-value-tool.fly.dev` is not on that environment's egress

@@ -1,7 +1,7 @@
 import SortHeader from "./SortHeader.jsx";
 import EmptyTableRow from "./EmptyTableRow.jsx";
 import SignalText from "./SignalText.jsx";
-import { ivColor, scoreColor } from "../lib/format.js";
+import { ivColor, fmtPctIV, scoreColor } from "../lib/format.js";
 
 export default function AllocationTable({ rows, sortBy, sortDir, sortToggle }) {
   return (
@@ -29,7 +29,7 @@ export default function AllocationTable({ rows, sortBy, sortDir, sortToggle }) {
                 <td className="px-2 py-2 text-right">
                   <span className={`inline-flex items-center justify-center w-12 py-0.5 rounded font-mono font-bold text-xs ${scoreColor(r.score)}`}>{r.score}</span>
                 </td>
-                <td className="px-2 py-2 text-right"><span className={`tabular-nums font-mono text-xs ${ivColor(r.pctIV)}`}>{r.pctIV.toFixed(2)}%</span></td>
+                <td className="px-2 py-2 text-right"><span className={`tabular-nums font-mono text-xs ${ivColor(r.pctIV)}`}>{fmtPctIV(r.pctIV)}</span></td>
                 <td className="px-3 py-2">
                   {r.buyShares ? (
                     <span className="inline-flex items-center gap-1.5 text-emerald-300 text-xs font-mono">

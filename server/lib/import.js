@@ -19,7 +19,9 @@ const DIFF_FIELDS = [...MERGE_FIELDS, "updated"];
 
 // A brand-new ticker needs every one of these to become a full stocks row --
 // mirrors the `required` tuple in scripts/import-sheet.py's main().
-export const ADD_REQUIRED_FIELDS = ["ttmEPS", "growth", "price", "updated", "valuation", "growthScore", "moat", "executionRisk", "economy"];
+export const CATEGORY_FIELDS = ["valuation", "growthScore", "moat", "executionRisk", "economy"];
+
+const todayShort = () => new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit" });
 
 function valuesEqual(a, b) {
   if (a == null || b == null) return a == b;
@@ -52,7 +54,7 @@ export function classifyField({ base, mine, theirs }) {
 // globals: current globals row (for the informational %IV before/after).
 // baselineRows: raw rows from `SELECT ticker, field, value, imported_at, source FROM import_baseline`.
 // source: display name for the upload (filename, or a fallback).
-export function buildPreview({ sheet, stocks, globals, baselineRows, source }) {
+export function buildPreview({ sheet, stocks, globals, baselineRows, source, quotes = {} }) {
   const baseline = new Map(); // ticker -> field -> row
   for (const row of baselineRows) {
     if (!baseline.has(row.ticker)) baseline.set(row.ticker, new Map());
@@ -107,30 +109,62 @@ export function buildPreview({ sheet, stocks, globals, baselineRows, source }) {
     }
   }
 
+  // Every workbook ticker is addable. Brandon scores names he does not value
+  // with Graham -- funds with no provider EPS (SGOV, BLV, DRAM), loss-makers
+  // (CRWV, HIMS, NVTS), and names he simply left blank (NBIS). Gaps are filled
+  // from live quotes where a provider has the number, and what could not be
+  // sourced is reported per field so the panel can say so rather than the row
+  // silently vanishing. `quotes` is a ticker -> quote map, or {} when quotes
+  // were unavailable.
   const adds = [];
   const skips = [];
   for (const [ticker, row] of Object.entries(sheet.tickers)) {
     if (stocksByTicker.has(ticker)) continue;
-    const missing = ADD_REQUIRED_FIELDS.filter((f) => row[f] == null);
-    if (missing.length > 0) {
-      skips.push({ ticker, score: row.score ?? null, reason: `missing ${missing.join(", ")}` });
+    const quote = quotes[ticker] || null;
+    const sources = {};
+
+    const pick = (field, sheetValue, providerValue) => {
+      if (sheetValue != null) { sources[field] = "workbook"; return sheetValue; }
+      if (providerValue != null) { sources[field] = "provider"; return providerValue; }
+      sources[field] = "none";
+      return null;
+    };
+
+    const ttmEPS = pick("ttmEPS", row.ttmEPS, quote?.trailingEps);
+    const currentPrice = pick("currentPrice", row.price, quote?.currentPrice ?? quote?.previousClose);
+    // `growth` is the operator's curated forward estimate and must never be
+    // auto-derived (see the refresh comment in App.jsx) -- default it to 0 and
+    // flag it for them to set.
+    const growth = row.growth != null ? row.growth : 0;
+    sources.growth = row.growth != null ? "workbook" : "operator";
+
+    const scoresMissing = CATEGORY_FIELDS.filter((f) => row[f] == null);
+    const scores = Object.fromEntries(CATEGORY_FIELDS.map((f) => [f, row[f] ?? 0]));
+
+    if (currentPrice == null) {
+      // With no price from either source there is nothing to track against.
+      skips.push({ ticker, score: row.score ?? null, reason: "no price in the workbook or from any provider" });
       continue;
     }
-    const pctIV = calcPctIV(row.price, calcIV(row.ttmEPS, row.growth, globals));
+
     adds.push({
       ticker,
       score: row.score,
-      ttmEPS: row.ttmEPS,
-      growth: row.growth,
-      currentPrice: row.price,
-      updated: row.updated,
-      valuation: row.valuation,
-      growthScore: row.growthScore,
-      moat: row.moat,
-      executionRisk: row.executionRisk,
-      economy: row.economy,
-      pctIV,
+      ttmEPS,
+      growth,
+      currentPrice,
+      updated: row.updated || todayShort(),
+      ...scores,
+      pctIV: calcPctIV(currentPrice, calcIV(ttmEPS, growth, globals)),
       preChecked: (row.score ?? 0) >= 75,
+      sources,
+      scoresMissing,
+      notes: [
+        sources.ttmEPS === "provider" && `EPS ${ttmEPS < 0 ? "(a loss)" : ""} from live data`,
+        sources.ttmEPS === "none" && "no EPS anywhere — curate it like QQQ/VOO",
+        sources.growth === "operator" && "growth not in workbook — set it yourself",
+        scoresMissing.length > 0 && "scores not in workbook — set them yourself",
+      ].filter(Boolean),
     });
   }
   adds.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));

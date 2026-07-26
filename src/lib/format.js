@@ -1,9 +1,16 @@
-export const fmtMoney = (n) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// null = not valuable (no positive EPS). Rendered as an em dash everywhere,
+// never as a number -- see the comment in lib/valuation.js.
+export const fmtMoney = (n) => (
+  n == null ? "—" : `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+);
+export const fmtPctIV = (pct) => (pct == null ? "—" : `${pct.toFixed(2)}%`);
 
 export const ivColor = (pct) =>
-  pct < 80 ? "text-emerald-400" : pct < 100 ? "text-emerald-300" : pct < 110 ? "text-amber-300" : "text-rose-400";
+  pct == null ? "text-zinc-600"
+  : pct < 80 ? "text-emerald-400" : pct < 100 ? "text-emerald-300" : pct < 110 ? "text-amber-300" : "text-rose-400";
 export const ivBg = (pct) =>
-  pct < 80 ? "bg-emerald-500/20 border-emerald-500/40"
+  pct == null ? "bg-zinc-800/40 border-zinc-700/40"
+  : pct < 80 ? "bg-emerald-500/20 border-emerald-500/40"
   : pct < 100 ? "bg-emerald-500/10 border-emerald-500/30"
   : pct < 110 ? "bg-amber-500/10 border-amber-500/30"
   : "bg-rose-500/10 border-rose-500/30";

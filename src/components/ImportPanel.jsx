@@ -343,8 +343,28 @@ export default function ImportPanel({ onImported }) {
                   <option value="pctiv">sort: %IV</option>
                   <option value="ticker">sort: ticker</option>
                 </select>
+                <div className="flex items-center gap-1">
+                  {[
+                    { label: "all", apply: () => true },
+                    { label: "none", apply: () => false },
+                    { label: "≥75", apply: (a) => (a.score ?? 0) >= 75 },
+                  ].map(({ label, apply }) => (
+                    <button
+                      key={label}
+                      onClick={() => setAddChecked((prev) => ({
+                        ...prev,
+                        // Only the rows currently visible, so the filter composes
+                        // with the bulk action instead of overriding it.
+                        ...Object.fromEntries(filteredAdds.map((a) => [a.ticker, apply(a)])),
+                      }))}
+                      className="px-2 py-1 rounded border border-zinc-800 hover:border-emerald-500/50 hover:text-emerald-300 text-[10px] font-mono text-zinc-400 transition"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <span className="ml-auto text-[10px] text-zinc-500 font-mono">
-                  {Object.values(addChecked).filter(Boolean).length} selected
+                  {Object.values(addChecked).filter(Boolean).length} of {preview.adds.length} selected
                 </span>
               </div>
               <div className="max-h-72 overflow-y-auto divide-y divide-zinc-900">
@@ -356,12 +376,17 @@ export default function ImportPanel({ onImported }) {
                       checked={!!addChecked[a.ticker]}
                       onChange={(e) => setAddChecked((s) => ({ ...s, [a.ticker]: e.target.checked }))}
                     />
-                    <div className="flex-1 grid grid-cols-5 gap-2 text-xs font-mono">
+                    <div className="flex-1">
+                    <div className="grid grid-cols-5 gap-2 text-xs font-mono">
                       <span className="text-zinc-200 font-semibold">{a.ticker}</span>
                       <span className={`${a.score >= 75 ? "text-emerald-300" : "text-zinc-400"}`}>score {a.score?.toFixed(0) ?? "—"}</span>
                       <span className="text-zinc-500">EPS {fmtVal("ttmEPS", a.ttmEPS)}</span>
                       <span className="text-zinc-500">growth {fmtVal("growth", a.growth)}</span>
-                      <span className="text-zinc-500">%IV {a.pctIV.toFixed(1)}</span>
+                      <span className="text-zinc-500">%IV {a.pctIV == null ? "—" : a.pctIV.toFixed(1)}</span>
+                    </div>
+                    {a.notes?.length > 0 && (
+                      <div className="mt-0.5 text-[10px] font-mono text-amber-300/70">{a.notes.join(" · ")}</div>
+                    )}
                     </div>
                   </label>
                 ))}

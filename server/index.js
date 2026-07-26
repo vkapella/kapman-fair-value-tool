@@ -23,7 +23,8 @@ const STOCK_FIELDS = ["ticker", "ttmEPS", "growth", "currentPrice", "updated", "
 const STOCK_FIELD_SET = new Set(STOCK_FIELDS);
 // epsPinned and pinnedCategories are optional everywhere (default to
 // 0 / "unpinned"): curation flags, not part of the core row contract.
-const REQUIRED_STOCK_FIELDS = STOCK_FIELDS.filter((field) => field !== "epsPinned" && field !== "pinnedCategories");
+const OPTIONAL_STOCK_FIELDS = new Set(["epsPinned", "pinnedCategories", "ttmEPS"]);
+const REQUIRED_STOCK_FIELDS = STOCK_FIELDS.filter((field) => !OPTIONAL_STOCK_FIELDS.has(field));
 const NUMERIC_STOCK_FIELDS = new Set(["ttmEPS", "growth", "currentPrice", "valuation", "growthScore", "moat", "executionRisk", "economy"]);
 const GLOBAL_FIELDS = ["peNoGrowth", "g", "avgYieldAAA", "bondYield"];
 const GLOBAL_FIELD_SET = new Set(GLOBAL_FIELDS);
@@ -173,6 +174,40 @@ if (!db.prepare("PRAGMA table_info(stocks)").all().some((c) => c.name === "curat
   })();
 }
 
+// Migration: ttm_eps becomes nullable. Brandon scores names he cannot value
+// with Graham -- funds (SGOV, BLV, DRAM) that have no provider EPS at all, and
+// loss-makers where TTM EPS is meaningless. NOT NULL forced those rows to be
+// skipped entirely. SQLite cannot relax a column constraint in place, so this
+// is the standard table rebuild; atomic, and guarded to run exactly once.
+if (db.prepare("PRAGMA table_info(stocks)").all().find((c) => c.name === "ttm_eps")?.notnull === 1) {
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE stocks_new (
+        ticker TEXT PRIMARY KEY,
+        ttm_eps REAL,
+        growth REAL NOT NULL,
+        current_price REAL NOT NULL,
+        updated TEXT NOT NULL,
+        valuation REAL NOT NULL,
+        growth_score REAL NOT NULL,
+        moat REAL NOT NULL,
+        execution_risk REAL NOT NULL,
+        economy REAL NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        eps_pinned INTEGER NOT NULL DEFAULT 0,
+        pinned_categories TEXT NOT NULL DEFAULT '',
+        curated_scores TEXT NOT NULL DEFAULT '{}'
+      );
+      INSERT INTO stocks_new SELECT
+        ticker, ttm_eps, growth, current_price, updated, valuation, growth_score,
+        moat, execution_risk, economy, position, eps_pinned, pinned_categories, curated_scores
+      FROM stocks;
+      DROP TABLE stocks;
+      ALTER TABLE stocks_new RENAME TO stocks;
+    `);
+  })();
+}
+
 const insertStock = db.prepare(`
   INSERT INTO stocks (
     ticker, ttm_eps, growth, current_price, updated, valuation,
@@ -304,6 +339,12 @@ function normalizeStockPayload(payload, { partial = false } = {}) {
   }
   if (payload.pinnedCategories != null) {
     stock.pinnedCategories = normalizePinnedCategories(payload.pinnedCategories).join(",");
+  }
+  // ttmEPS is explicitly nullable: a row can carry a score with no valuation
+  // (funds with no provider EPS, loss-makers). `null` clears it; anything
+  // non-numeric is still rejected.
+  if (Object.prototype.hasOwnProperty.call(payload, "ttmEPS") && payload.ttmEPS === null) {
+    stock.ttmEPS = null;
   }
   for (const field of NUMERIC_STOCK_FIELDS) {
     if (payload[field] != null) stock[field] = normalizeFiniteNumber(payload[field], field);
@@ -512,12 +553,18 @@ function normalizeFactorPatch(payload) {
 }
 
 function handleRoute(fn) {
+  const fail = (res, error) => {
+    const status = error.status || 500;
+    res.status(status).json({ error: status === 500 ? "internal server error" : error.message });
+  };
   return (req, res) => {
     try {
-      fn(req, res);
+      // Async handlers return a promise; without catching it a rejection would
+      // escape this try block and leave the request hanging.
+      const out = fn(req, res);
+      if (out && typeof out.then === "function") out.catch((error) => fail(res, error));
     } catch (error) {
-      const status = error.status || 500;
-      res.status(status).json({ error: status === 500 ? "internal server error" : error.message });
+      fail(res, error);
     }
   };
 }
@@ -921,7 +968,7 @@ app.get("/api/snapshots/:id", handleRoute((req, res) => {
 // place to carry it.
 const importUpload = express.raw({ type: "application/octet-stream", limit: "25mb" });
 
-app.post("/api/import/preview", importUpload, handleRoute((req, res) => {
+app.post("/api/import/preview", importUpload, handleRoute(async (req, res) => {
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
     throw apiError(400, "request body must be the raw bytes of an .xlsx workbook (Content-Type: application/octet-stream)");
   }
@@ -943,7 +990,19 @@ app.post("/api/import/preview", importUpload, handleRoute((req, res) => {
   const stocks = getStocks();
   const globals = getGlobals();
   const baselineRows = db.prepare("SELECT ticker, field, value, imported_at, source FROM import_baseline").all();
-  res.json(buildPreview({ sheet, stocks, globals, baselineRows, source }));
+  // Fill workbook gaps from live providers so rows Brandon scores but does not
+  // value (funds, loss-makers) are still addable instead of silently skipped.
+  const untracked = Object.keys(sheet.tickers).filter((t) => !stocks.some((s) => s.ticker === t));
+  let quotes = {};
+  if (untracked.length > 0) {
+    try {
+      quotes = await buildQuoteMap(untracked);
+    } catch (_) {
+      quotes = {}; // provider outage degrades the fill, it must not fail the preview
+    }
+  }
+
+  res.json(buildPreview({ sheet, stocks, globals, baselineRows, source, quotes }));
 }));
 
 // Reshapes/validates the client's chosen subset of a preview into what the

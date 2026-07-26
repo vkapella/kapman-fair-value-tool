@@ -101,7 +101,7 @@ export default function App() {
     const pctIV = calcPctIV(s.currentPrice, iv);
     const score = calcScore(s);
     const sig = allocationSignals(s, iv, pctIV, score);
-    const pe = s.ttmEPS > 0 ? s.currentPrice / s.ttmEPS : null;
+    const pe = s.ttmEPS > 0 ? s.currentPrice / s.ttmEPS : null; // negative/absent EPS has no meaningful P/E
     const forwardEps = yahooData[s.ticker]?.forwardEps ?? null;
     const forwardPe = forwardEps > 0 ? s.currentPrice / forwardEps : null;
     const quote = yahooData[s.ticker];
@@ -314,8 +314,10 @@ export default function App() {
   };
 
   const stats = useMemo(() => ({
-    buyZone: rows.filter((r) => r.score >= 75 && r.pctIV < 100).length,
-    overvalued: rows.filter((r) => r.pctIV >= 110).length,
+    // Rows with no positive EPS have pctIV null -- they are neither cheap nor
+    // expensive, so they must not land in either bucket.
+    buyZone: rows.filter((r) => r.pctIV != null && r.score >= 75 && r.pctIV < 100).length,
+    overvalued: rows.filter((r) => r.pctIV != null && r.pctIV >= 110).length,
     avgScore: rows.length ? rows.reduce((a, r) => a + r.score, 0) / rows.length : 0,
   }), [rows]);
 

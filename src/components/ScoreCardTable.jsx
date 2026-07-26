@@ -4,7 +4,7 @@ import TextCell from "./cells/TextCell.jsx";
 import SortHeader from "./SortHeader.jsx";
 import EmptyTableRow from "./EmptyTableRow.jsx";
 import Legend from "./Legend.jsx";
-import { ivColor, scoreColor } from "../lib/format.js";
+import { ivColor, scoreColor, fmtPctIV } from "../lib/format.js";
 
 // Matches the SortHeader columns below (label + max stay hard-coded here to
 // keep this table's header text exactly as before -- only the repeated cell
@@ -48,7 +48,7 @@ export default function ScoreCardTable({ rows, updateStock, removeStock, stocks,
               return (
                 <tr key={r.ticker} className="hairline hover:bg-zinc-900/30 group">
                   <td className="px-3 py-2"><TextCell value={r.ticker} onChange={(v) => updateStock(idx, { ticker: v })} width="w-16" uppercase /></td>
-                  <td className="px-2 py-2 text-right"><span className={`tabular-nums font-mono text-xs ${ivColor(r.pctIV)}`}>{r.pctIV.toFixed(2)}%</span></td>
+                  <td className="px-2 py-2 text-right"><span className={`tabular-nums font-mono text-xs ${ivColor(r.pctIV)}`}>{fmtPctIV(r.pctIV)}</span></td>
                   {CATEGORY_COLUMNS.map(({ key, max }) => {
                     const unpinned = !(r.pinnedCategories || []).includes(key);
                     return (

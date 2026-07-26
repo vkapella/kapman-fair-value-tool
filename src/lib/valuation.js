@@ -1,11 +1,31 @@
 // Shared valuation math. Imported by both the SPA and the server (snapshot
 // endpoint) so frozen snapshot rows are computed with exactly the same
 // formulas the UI displays.
-export const calcIV = (eps, growth, g) => eps * (g.peNoGrowth + g.g * growth) * (g.avgYieldAAA / g.bondYield);
-export const calcPctIV = (price, iv) => (iv > 0 ? (price / iv) * 100 : 0);
+
+// Graham's formula is only meaningful on positive earnings. A loss-making
+// company yields a negative "intrinsic value", and the old guard (`iv > 0 ? …
+// : 0`) turned that into a displayed 0.00% of IV -- which reads as infinitely
+// cheap and fired every allocation signal at maximum aggression. Null means
+// "cannot be valued", and every consumer must render it as such rather than
+// inventing a number.
+// Also null when the formula itself lands non-positive: a steeply negative
+// growth rate drives the multiplier below zero even on positive EPS (XOM at
+// -43% growth produced an intrinsic value of -$223.81). A negative intrinsic
+// value is meaningless whatever the cause.
+export const calcIV = (eps, growth, g) => {
+  if (eps == null || !(eps > 0)) return null;
+  const iv = eps * (g.peNoGrowth + g.g * growth) * (g.avgYieldAAA / g.bondYield);
+  return iv > 0 ? iv : null;
+};
+export const calcPctIV = (price, iv) => (iv == null || !(iv > 0) || price == null ? null : (price / iv) * 100);
 export const calcScore = (s) => (s.valuation || 0) + (s.growthScore || 0) + (s.moat || 0) + (s.executionRisk || 0) + (s.economy || 0);
 
 export const allocationSignals = (s, iv, pctIV, score) => {
+  // No valuation, no recommendation. Signals key off pctIV, so an unvaluable
+  // row must abstain rather than fall through the thresholds.
+  if (pctIV == null) {
+    return { buyShares: false, buySharesPct: null, sellPutsNote: "n/a", buyCallsNote: "n/a" };
+  }
   const buyShares = score >= 75 && pctIV < 110;
   const buySharesPct = !buyShares ? null
     : score >= 80 && pctIV < 95 ? Math.min(5, Math.round((100 - pctIV) / 8))

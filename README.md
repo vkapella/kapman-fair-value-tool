@@ -1,6 +1,6 @@
 # Fair Value Evaluator
 
-Modified-Graham intrinsic value tool with manual scorecard, Yahoo-backed live price refresh, and Finnhub-first fundamentals. Deploys to Fly.io as a single Node container.
+Modified-Graham intrinsic value tool with a provider-backed scorecard, explicit operator overrides, and bulk ticker intake. Yahoo and Finnhub market data stay behind the Express API. The app deploys to Fly.io as a single Node container.
 
 ```
 IV = EPS × (P/E_no_growth + g × Growth%) × (Avg_AAA_Yield / Bond_Yield)
@@ -55,6 +55,10 @@ curl -sf http://localhost:8080/api/data
 curl -sf -X POST http://localhost:8080/api/prices \
   -H "content-type: application/json" \
   -d '{"tickers":["AAPL","MSFT"]}'
+
+curl -sf -X POST http://localhost:8080/api/quotes \
+  -H "content-type: application/json" \
+  -d '{"tickers":["AAPL"]}'
 ```
 
 ### Run the Docker container locally
@@ -196,6 +200,9 @@ User edits (tickers, scores, growth rates, current prices, update dates, and for
 - `PUT /api/stocks/:ticker`
 - `DELETE /api/stocks/:ticker`
 - `PUT /api/globals`
+- `PUT /api/factors/:ticker`
+- `POST /api/import/tickers`
+- `POST /api/import/apply`
 
 The database is initialized on server startup. Empty tables are seeded from `src/lib/defaultData.js`.
 
@@ -211,6 +218,27 @@ The `fly.toml` mount maps that volume to `/data`, so the watchlist survives app 
 
 - **Prices** (`/api/prices`): Yahoo Finance via `yahoo-finance2` (no key required).
 - **Fundamentals** (`/api/quotes`): Finnhub free tier is the primary source (key required, 60 calls/min, US symbols); Yahoo back-fills ownership, short interest, cash/debt/FCF levels, and forward EPS. Finnhub values are unit-normalized to fractions/absolute dollars to match the rubric.
+
+`/api/quotes` atomically persists eligible price/EPS updates and provider
+factors, recomputes every unpinned category, and returns the authoritative
+saved rows in the same response.
+
+## Ticker import and data ownership
+
+The **Ticker Import** tab accepts comma-, space-, or newline-separated symbols.
+Preview uses the live providers, skips symbols already on the watchlist, and
+shows missing inputs before apply. Apply snapshots the current model, then adds
+the selected batch transactionally.
+
+New imported rows start unpinned with live model scores. Forward growth starts
+at a conservative 0% and is flagged for operator review; trailing provider
+growth is not silently substituted for a long-term forecast. Existing rows and
+their EPS/category pins are never changed by ticker import.
+
+- Providers own live prices, eligible unpinned GAAP TTM EPS, and quantitative
+  factor values.
+- The operator owns forward growth, qualitative judgments, manual factor
+  overrides, pinned EPS, and curated category scores.
 
 Get a Finnhub key: https://finnhub.io/dashboard (the key is shared with kapman-finnhub-mcp-server — both draw from the same 60 calls/min budget).
 

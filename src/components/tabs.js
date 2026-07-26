@@ -1,4 +1,4 @@
-import { TrendingUp, Calculator, Target, Scale, Sprout, Shield, AlertTriangle, Globe, FileSpreadsheet } from "lucide-react";
+import { TrendingUp, Calculator, Target, Scale, Sprout, Shield, AlertTriangle, Globe, ListPlus } from "lucide-react";
 import { RUBRIC_DEF, CATEGORY_KEYS } from "../lib/rubric.js";
 
 // One icon per rubric category, keyed by the same CATEGORY_KEYS the rubric
@@ -26,5 +26,5 @@ export const PRIMARY_TABS = [
     icon: CATEGORY_ICONS[key] || Target,
     separator: i === 0, // divider before the first category tab
   })),
-  { id: "import", label: "Sheet Import", icon: FileSpreadsheet, separator: true },
+  { id: "import", label: "Ticker Import", icon: ListPlus, separator: true },
 ];

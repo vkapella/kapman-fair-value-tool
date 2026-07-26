@@ -62,7 +62,7 @@ export default function IntrinsicTable({ rows, updateStock, removeStock, stocks,
                             }
                           }}
                           title={r.epsPinned
-                            ? "EPS is pinned (sheet/operator-curated) — refresh updates price only. Click to unpin and let refresh overwrite it."
+                            ? "EPS is operator-curated and pinned — refresh updates price only. Click to unpin and let refresh overwrite it."
                             : "No provider EPS for this ticker — value is operator-maintained. Refresh updates price only and leaves the Updated date alone."}
                           className="text-[9px] uppercase tracking-wider font-mono px-1 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300">
                           {r.epsPinned ? "pinned" : "curated"}

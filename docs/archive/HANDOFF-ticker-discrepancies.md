@@ -1,4 +1,7 @@
-# Handoff — app watchlist vs. IWB Stock Sheet 4.0
+# Archived handoff — app watchlist vs. IWB Stock Sheet 4.0
+
+> Historical record only. The application no longer consumes this workbook;
+> providers and operator inputs are the current data owners.
 
 > **Status 7/26/26 (local session):** Prod read via `/api/data` — refresh HAS
 > been run (all 16 rows stamped 7/26/26, MU self-corrected to 44.69), and QQQ

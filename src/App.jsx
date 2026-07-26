@@ -394,7 +394,7 @@ export default function App() {
                   sortToggle={sortToggle}
                 />
               )}
-              {tab === "import" && <ImportPanel />}
+              {tab === "import" && <ImportPanel onImported={loadData} />}
             </>
           )}
 

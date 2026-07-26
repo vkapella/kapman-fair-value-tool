@@ -1,14 +1,13 @@
-// Server-side scoring engine. Reuses the exact same rubric weighting the SPA
-// worksheet uses (suggestScore) so a score computed here and one computed in
-// the browser can never diverge.
+// Server-side scoring engine. Reuses the exact same rubric definition the
+// category screens render, so displayed inputs, declared weights, and computed
+// scores cannot silently diverge.
 import { CATEGORY_KEYS, FACTOR_INDEX, suggestScore } from "../../src/lib/rubric.js";
 import { calcIV, calcPctIV } from "../../src/lib/valuation.js";
 
-// stock_factors stores everything as TEXT (SQLite is dynamically typed and a
-// few quant fields, e.g. sector/industry, are genuinely text). Coerce back to
-// the shape suggestScore/rubric bands expect: judgment values are select
-// indices (numbers), text quant fields stay strings, everything else is a
-// finite number or null.
+// stock_factors stores everything as TEXT (SQLite is dynamically typed).
+// Coerce back to the shape suggestScore/rubric bands expect: judgment values
+// are select indices, text quant fields stay strings, and numeric fields
+// become finite numbers or null.
 export function coerceFactorValue(key, rawValue) {
   if (rawValue == null) return null;
   const info = FACTOR_INDEX[key];

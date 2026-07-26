@@ -3,7 +3,7 @@
 Modified-Graham intrinsic value tool with a provider-backed scorecard, explicit operator overrides, and bulk ticker intake. Yahoo and Finnhub market data stay behind the Express API. The app deploys to Fly.io as a single Node container.
 
 ```
-IV = EPS × (P/E_no_growth + g × Growth%) × (Avg_AAA_Yield / Bond_Yield)
+IV = Valuation TTM EPS × (P/E_no_growth + g × IV Growth Assumption%) × (Avg_AAA_Yield / Bond_Yield)
 ```
 
 ## Local dev and test commands
@@ -236,6 +236,31 @@ independent of the basis: it freezes the copied valuation value until unpinned,
 while provider refreshes continue updating both source EPS fields. Editing the
 valuation value directly records Operator and pins it. The formula always uses
 Valuation TTM EPS, never a display-only GAAP or adjusted value.
+
+### Screen ownership and score wiring
+
+- **Main Score Card** is a read-only rollup of effective category scores and
+  valuation position.
+- **Intrinsic Value** owns EPS-source diagnostics, Valuation TTM EPS, its
+  independent EPS pin, the operator's long-term IV Growth Assumption, current
+  price, and formula outputs.
+- **Valuation** owns `% of Intrinsic Value`, Provider TTM P/E, Consensus
+  Forward P/E, price-to-book, debt-to-equity, and current ratio.
+- **Growth**, **Moat**, **Execution Risk**, and **Economy** each own their
+  category's provider factors and operator judgments.
+- **Allocation Signals** is a decision-output view derived from score and
+  `% of Intrinsic Value`.
+
+Every field displayed on a category tab contributes to that category's score.
+The tests require its displayed score keys, declared weights, and formula
+breakdown to match. A category-score edit pins an explicit operator score on
+that category tab; unpinning restores the live model while retaining the
+curated score for later re-pinning.
+
+`TTM EPS Growth YoY` on Growth is a backward-looking provider factor weighted
+at 30% of the Growth score. `IV Growth Assumption` on Intrinsic Value is the
+operator's forward-looking long-term formula input. They are intentionally not
+the same field. P/E ratios appear only on Valuation, their scoring owner.
 
 The refresh path is intentionally budgeted for Finnhub's free tier: it requests
 the per-symbol `/stock/metric` and `/stock/earnings` data needed for

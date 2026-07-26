@@ -1,9 +1,11 @@
 import { Pin, PinOff } from "lucide-react";
 import FactorCell from "./cells/FactorCell.jsx";
 import JudgmentCell from "./cells/JudgmentCell.jsx";
+import NumCell from "./cells/NumCell.jsx";
 import SortHeader from "./SortHeader.jsx";
 import EmptyTableRow from "./EmptyTableRow.jsx";
-import { RUBRIC_DEF } from "../lib/rubric.js";
+import { RUBRIC_DEF, SCORE_WEIGHTS } from "../lib/rubric.js";
+import { formatFieldValue } from "../lib/format.js";
 
 // One grid per rubric category (Valuation / Growth / Moat / Execution Risk /
 // Economy). Columns are derived entirely from RUBRIC_DEF[category] so a
@@ -11,7 +13,16 @@ import { RUBRIC_DEF } from "../lib/rubric.js";
 // touching this file.
 export default function CategoryGrid({ category, rows, stocks, factors, computed, updateStock, updateFactor, sortBy, sortDir, sortToggle }) {
   const def = RUBRIC_DEF[category];
-  const colSpan = 2 + def.quantitativeFields.length + def.qualitativeFields.length + 3;
+  const derivedFields = def.derivedFields || [];
+  const scoreFields = [...derivedFields, ...def.quantitativeFields, ...def.qualitativeFields];
+  const colSpan = 1 + derivedFields.length + def.quantitativeFields.length + def.qualitativeFields.length + 3;
+  const weightLabel = (field) => {
+    const scoreKey = field.scoreKey || field.key;
+    const percent = Math.round((SCORE_WEIGHTS[category][scoreKey] || 0) * 100);
+    const shared = scoreFields.filter((candidate) => (candidate.scoreKey || candidate.key) === scoreKey).length > 1;
+    return `${percent}%${shared ? " shared" : ""}`;
+  };
+  const fieldTitle = (field) => `${field.description} · Score weight: ${weightLabel(field)}`;
 
   const togglePin = (idx, current) => {
     const pinned = new Set(current.pinnedCategories || []);
@@ -24,8 +35,8 @@ export default function CategoryGrid({ category, rows, stocks, factors, computed
       <div className="px-4 py-3 border-b border-zinc-800">
         <h2 className="font-display text-lg font-bold">{def.label.replace(/\s*\/\d+$/, "")} Factors</h2>
         <p className="text-[11px] text-zinc-500 font-mono">
-          Fetched values are dimmed; an override is bright with a ● marker and a × to clear it. Judgment fields default to
-          <span className="text-zinc-400"> — not assessed — </span> until you set them.
+          Every displayed factor feeds this category score. Model outputs are read-only; fetched values are dimmed and manual overrides are bright with a ● marker.
+          Judgment fields default to <span className="text-zinc-400"> — not assessed — </span> until you set them.
         </p>
       </div>
       <div className="overflow-x-auto">
@@ -33,18 +44,22 @@ export default function CategoryGrid({ category, rows, stocks, factors, computed
           <thead className="bg-zinc-900/50">
             <tr className="hairline">
               <SortHeader col="ticker" label="Ticker" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} align="left" />
+              {derivedFields.map((field) => (
+                <th key={field.key} title={fieldTitle(field)} className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-zinc-500">
+                  {field.label}<span className="block text-[9px] text-zinc-600">{weightLabel(field)}</span>
+                </th>
+              ))}
               {def.quantitativeFields.map((field) => (
-                <th key={field.key} title={field.description} className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-zinc-500">
-                  {field.label}
+                <th key={field.key} title={fieldTitle(field)} className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-zinc-500">
+                  {field.label}<span className="block text-[9px] text-zinc-600">{weightLabel(field)}</span>
                 </th>
               ))}
               {def.qualitativeFields.map((field) => (
-                <th key={field.key} title={field.description} className="px-2 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-zinc-500">
-                  {field.label}
+                <th key={field.key} title={fieldTitle(field)} className="px-2 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-zinc-500">
+                  {field.label}<span className="block text-[9px] text-zinc-600">{weightLabel(field)}</span>
                 </th>
               ))}
-              <th className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-zinc-500">Computed</th>
-              <SortHeader col={category} label="Effective" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
+              <SortHeader col={category} label="Category Score" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
               <th className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-zinc-500">Unassessed</th>
               <th className="px-2 py-2 text-center text-[10px] uppercase tracking-wider font-medium text-zinc-500">Pin</th>
             </tr>
@@ -61,6 +76,11 @@ export default function CategoryGrid({ category, rows, stocks, factors, computed
               return (
                 <tr key={r.ticker} className="hairline hover:bg-zinc-900/30 group">
                   <td className="px-3 py-2 font-mono text-xs text-zinc-200">{r.ticker}</td>
+                  {derivedFields.map((field) => (
+                    <td key={field.key} title={field.description} className="px-2 py-2 text-right tabular-nums font-mono text-xs text-zinc-300">
+                      {formatFieldValue(r[field.key], field.format)}
+                    </td>
+                  ))}
                   {def.quantitativeFields.map((field) => {
                     const entry = tickerFactors[field.key] || { manual: null, fetched: null };
                     return (
@@ -86,12 +106,18 @@ export default function CategoryGrid({ category, rows, stocks, factors, computed
                       </td>
                     );
                   })}
-                  <td className="px-2 py-2 text-right tabular-nums font-mono text-xs text-zinc-500">
-                    {comp != null ? comp : "—"}
-                  </td>
                   <td className="px-2 py-2 text-right">
                     <div className="flex items-center justify-end gap-1.5">
-                      <span className="tabular-nums font-mono text-xs font-bold text-zinc-100">{effective}</span>
+                      <NumCell
+                        value={effective}
+                        onChange={(value) => updateStock(idx, {
+                          [category]: value,
+                          pinnedCategories: Array.from(new Set([...(r.pinnedCategories || []), category])),
+                        })}
+                        decimals={0}
+                        max={def.max}
+                        width="w-12"
+                      />
                       {isPinned && comp != null && comp !== effective && (
                         <span className="tabular-nums font-mono text-[10px] text-zinc-600">model {comp}</span>
                       )}

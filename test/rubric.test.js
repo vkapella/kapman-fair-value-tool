@@ -67,11 +67,11 @@ test("profit margin and institutional concentration contribute non-trivially", (
   assert.ok(moderateOwnership.contribution > veryLowOwnership.contribution);
 });
 
-test("52-week absolute prices are excluded and text classifications remain context-only", () => {
+test("context-only market classifications are excluded from score-input grids", () => {
   assert.equal(FACTOR_INDEX.fiftyTwoWeekHigh, undefined);
   assert.equal(FACTOR_INDEX.fiftyTwoWeekLow, undefined);
-  assert.equal(FACTOR_INDEX.sector.format, "text");
-  assert.equal(FACTOR_INDEX.industry.format, "text");
+  assert.equal(FACTOR_INDEX.sector, undefined);
+  assert.equal(FACTOR_INDEX.industry, undefined);
 
   const economyBreakdownKeys = new Set(
     suggestScore("economy", { sector: "Technology", industry: "Software" }, 100, {}, {}).breakdown
@@ -79,6 +79,52 @@ test("52-week absolute prices are excluded and text classifications remain conte
   );
   assert.equal(economyBreakdownKeys.has("sector"), false);
   assert.equal(economyBreakdownKeys.has("industry"), false);
-  assert.ok(RUBRIC_DEF.economy.quantitativeFields.some((field) => field.key === "sector"));
-  assert.ok(RUBRIC_DEF.economy.quantitativeFields.some((field) => field.key === "industry"));
+  assert.equal(RUBRIC_DEF.economy.quantitativeFields.some((field) => field.key === "sector"), false);
+  assert.equal(RUBRIC_DEF.economy.quantitativeFields.some((field) => field.key === "industry"), false);
+});
+
+test("every category-screen input maps to exactly one weighted score component", () => {
+  for (const category of CATEGORY_KEYS) {
+    const def = RUBRIC_DEF[category];
+    const displayedInputs = [
+      ...(def.derivedFields || []),
+      ...def.quantitativeFields,
+      ...def.qualitativeFields,
+    ];
+    const displayedScoreKeys = new Set(displayedInputs.map((field) => field.scoreKey || field.key));
+    assert.deepEqual(
+      [...displayedScoreKeys].sort(),
+      Object.keys(SCORE_WEIGHTS[category]).sort(),
+      `${category} displayed inputs and score weights drifted`
+    );
+
+    const breakdownKeys = new Set(
+      suggestScore(category, {}, 100, {}, {}).breakdown.map((entry) => entry.key)
+    );
+    assert.deepEqual(
+      [...breakdownKeys].sort(),
+      Object.keys(SCORE_WEIGHTS[category]).sort(),
+      `${category} score formula and declared weights drifted`
+    );
+  }
+});
+
+test("stored factor inputs have one category owner", () => {
+  const seen = new Map();
+  for (const category of CATEGORY_KEYS) {
+    const def = RUBRIC_DEF[category];
+    for (const field of [...def.quantitativeFields, ...def.qualitativeFields]) {
+      assert.equal(seen.has(field.key), false, `${field.key} is displayed in both ${seen.get(field.key)} and ${category}`);
+      seen.set(field.key, category);
+      assert.equal(FACTOR_INDEX[field.key].category, category);
+    }
+  }
+});
+
+test("zero cash with debt is scored as leverage risk rather than missing data", () => {
+  const noCash = breakdownEntry("growthScore", "debtVsCash", { totalDebt: 100, totalCash: 0 });
+  const balanced = breakdownEntry("growthScore", "debtVsCash", { totalDebt: 100, totalCash: 100 });
+  const missing = breakdownEntry("growthScore", "debtVsCash", { totalDebt: 100 });
+  assert.ok(noCash.contribution < balanced.contribution);
+  assert.ok(noCash.contribution < missing.contribution);
 });

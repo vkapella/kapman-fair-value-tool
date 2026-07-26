@@ -90,9 +90,17 @@ export const RUBRIC_DEF = {
       { min: 6, max: 9, label: "Moderately overvalued — growth must justify the premium", description: "Price exceeds intrinsic value by 10–30%; requires sustained earnings delivery to earn its multiple." },
       { min: 0, max: 5, label: "Speculative premium — Graham would not underwrite this price", description: "Price is more than 30% above intrinsic value; the margin of safety is negative." },
     ],
+    derivedFields: [
+      {
+        key: "pctIV",
+        label: "% of Intrinsic Value",
+        format: "percentValue",
+        description: "Current price divided by intrinsic value; a read-only model output and 50% of the Valuation score",
+      },
+    ],
     quantitativeFields: [
-      { key: "trailingPE", label: "Trailing P/E", format: "ratio", description: "Trailing P/E — price relative to last twelve months earnings" },
-      { key: "forwardPE", label: "Forward P/E", format: "ratio", description: "Forward P/E — price relative to next twelve months consensus earnings" },
+      { key: "trailingPE", label: "Provider TTM P/E", format: "ratio", description: "Provider trailing P/E — market price relative to provider-reported last-twelve-month earnings" },
+      { key: "forwardPE", label: "Consensus Forward P/E", format: "ratio", description: "Provider forward P/E — market price relative to next-twelve-month consensus earnings" },
       { key: "priceToBook", label: "Price-to-book", format: "ratio", description: "Price-to-book — price relative to net asset value per share" },
       { key: "debtToEquity", label: "Debt-to-equity", format: "ratio", description: "Debt-to-equity — financial leverage; Graham required this below 1.0 for defensive stocks" },
       { key: "currentRatio", label: "Current ratio", format: "ratio", description: "Current ratio — short-term liquidity; Graham required at least 2.0" },
@@ -109,15 +117,16 @@ export const RUBRIC_DEF = {
       { min: 6, max: 9, label: "Unreliable trend — Graham would demand a steep discount", description: "Fewer than five years of consistent growth or a track record that includes earnings deficits or heavy dilution." },
       { min: 0, max: 5, label: "Fails the consistency test", description: "Negative EPS years in the recent record, shrinking margins, or growth that is entirely debt or acquisition funded." },
     ],
+    derivedFields: [],
     quantitativeFields: [
-      { key: "epsGrowthRate", label: "EPS growth rate", format: "percent", description: "EPS growth rate — year-over-year earnings per share change (sourced from top-level yahoo field)" },
-      { key: "revenueGrowth", label: "Revenue growth", format: "percent", description: "Revenue growth — top-line expansion confirming earnings growth is real" },
+      { key: "epsGrowthRate", label: "TTM EPS Growth YoY", format: "percent", description: "Provider trailing-twelve-month EPS change versus the prior year; this is not the operator's long-term IV growth assumption" },
+      { key: "revenueGrowth", label: "TTM Revenue Growth YoY", format: "percent", description: "Provider trailing-twelve-month revenue change versus the prior year" },
       { key: "freeCashflow", label: "Free cash flow", format: "currency", description: "Free cash flow — operating cash after capex; confirms earnings are not accounting artifacts" },
-      { key: "totalDebt", label: "Total debt", format: "currency", description: "Total debt — Graham flagged debt-funded growth as unreliable" },
-      { key: "totalCash", label: "Total cash", format: "currency", description: "Total cash — balance sheet cushion; net debt = total debt minus total cash" },
+      { key: "totalDebt", scoreKey: "debtVsCash", label: "Total debt", format: "currency", description: "Total debt — combined with Total cash in the Debt-to-Cash factor (13% of Growth)" },
+      { key: "totalCash", scoreKey: "debtVsCash", label: "Total cash", format: "currency", description: "Total cash — combined with Total debt in the Debt-to-Cash factor (13% of Growth)" },
     ],
     qualitativeFields: [
-      { key: "growthConsistency", label: "EPS consistency (10-year record)", type: "select", options: ["10+ years no deficits", "7–9 years no deficits", "5–6 years no deficits", "3–4 years or deficit present", "Under 3 years or chronic deficits"], description: "Graham required earnings in every year of the past ten; check annual EPS history on the Intrinsic Value tab or SEC filings." },
+      { key: "growthConsistency", label: "EPS consistency (10-year record)", type: "select", options: ["10+ years no deficits", "7–9 years no deficits", "5–6 years no deficits", "3–4 years or deficit present", "Under 3 years or chronic deficits"], description: "Graham required earnings in every year of the past ten; assess this from annual filings or a validated history source." },
       { key: "growthFundingQuality", label: "Earnings quality", type: "select", options: ["Entirely organic / FCF-funded", "Mostly organic with modest debt", "Mixed organic and debt", "Primarily debt or acquisition-driven", "Dilution or financial engineering"], description: "Buffett prizes earnings generated by the business, not manufactured by the balance sheet." },
     ],
   },
@@ -131,6 +140,7 @@ export const RUBRIC_DEF = {
       { min: 6, max: 9, label: "Shallow moat — margin pressure is a present risk", description: "Returns on capital are near the cost of capital; the business competes primarily on price." },
       { min: 0, max: 5, label: "No moat — commodity economics", description: "Gross margins are thin, returns on equity are below 10%, and there is no identifiable reason a customer would not switch to a lower-cost alternative." },
     ],
+    derivedFields: [],
     quantitativeFields: [
       { key: "returnOnEquity", label: "Return on equity", format: "percent", description: "Return on equity — net income as a percentage of shareholder equity; Buffett's primary moat proxy, target above 15%" },
       { key: "returnOnAssets", label: "Return on assets", format: "percent", description: "Return on assets — how efficiently assets generate earnings; complements ROE by removing leverage effects" },
@@ -153,6 +163,7 @@ export const RUBRIC_DEF = {
       { min: 3, max: 4, label: "Caution — misalignment or capital allocation concerns", description: "Excessive dilution, poorly timed buybacks, acquisition sprees, or compensation that does not track shareholder returns." },
       { min: 0, max: 2, label: "High risk — Graham and Buffett would not invest regardless of price", description: "Material governance failures, earnings restatements, aggressive accounting, or management that treats the company as a personal ATM." },
     ],
+    derivedFields: [],
     quantitativeFields: [
       { key: "insidersPercentHeld", label: "Insider ownership", format: "percent", description: "Insider ownership — percentage of shares held by directors and officers; higher is better as it aligns interests with shareholders" },
       { key: "institutionsPercentHeld", label: "Institutional ownership", format: "percent", description: "Institutional ownership — percentage held by institutions; very high concentration can mean crowded exit risk" },
@@ -173,15 +184,10 @@ export const RUBRIC_DEF = {
       { min: 8, max: 14, label: "Meaningful macro drag — proceed with caution", description: "Elevated rates, sector under regulatory or competitive pressure, or meaningful cyclical exposure at a vulnerable point in the cycle." },
       { min: 0, max: 7, label: "Severe headwinds — Graham would demand an extreme discount", description: "Existential regulatory threat, deep cyclical trough, or structural industry decline; only the strongest balance sheets survive." },
     ],
+    derivedFields: [],
     quantitativeFields: [
       { key: "beta", label: "Beta", format: "number", description: "Beta — sensitivity of the stock's returns to market movements; above 1.5 signals high cyclicality, below 0.8 suggests defensive characteristics" },
       { key: "dividendYield", label: "Dividend yield", format: "percent", description: "Dividend yield — Graham required 20 or more years of uninterrupted dividends as a quality filter; yield also signals cash generation discipline" },
-      // Context-only until a defensible sector-relative model exists; arbitrary
-      // "good sector" rankings do not belong in the current single-formula score.
-      { key: "sector", label: "Sector", format: "text", description: "Sector — used to calibrate industry cyclicality and regulatory exposure" },
-      // Context-only for the same reason as sector. Display and persist it, but
-      // do not turn a free-text industry label into an unsupported numeric score.
-      { key: "industry", label: "Industry", format: "text", description: "Industry — provides context for competitive dynamics and secular growth or decline" },
     ],
     qualitativeFields: [
       { key: "rateEnvironment", label: "Interest rate environment", type: "select", options: ["Falling rates — tailwind for equity valuations", "Stable rates — neutral", "Rising rates — headwind, particularly for high-multiple stocks", "Peak rates — watching for inflection", "Rate uncertainty — high dispersion of outcomes"], description: "Graham's revised formula explicitly adjusts intrinsic value for bond yields; the bond yield input in your globals already captures this — use this field for directional context." },
@@ -220,10 +226,13 @@ export function suggestScore(category, fundamentals, pctIV, globals, overrides =
 
   if (category === "growthScore") {
     const growthEval = (v) => (v > 0.2 ? 1 : v >= 0.15 ? 0.85 : v >= 0.1 ? 0.65 : v >= 0.05 ? 0.4 : 0.15);
+    const debtToCash = all.totalDebt != null && all.totalCash != null
+      ? (all.totalCash > 0 ? all.totalDebt / all.totalCash : (all.totalDebt > 0 ? Number.POSITIVE_INFINITY : 0))
+      : null;
     push("epsGrowthRate", "EPS growth rate", weights.epsGrowthRate, growthEval, all.epsGrowthRate);
     push("revenueGrowth", "Revenue growth", weights.revenueGrowth, growthEval, all.revenueGrowth);
     push("freeCashflow", "Free cash flow", weights.freeCashflow, (v) => (v > 0 ? 0.9 : 0.1), all.freeCashflow);
-    push("debtVsCash", "Debt vs cash", weights.debtVsCash, (v) => (v < 0.5 ? 1 : v <= 1 ? 0.8 : v <= 2 ? 0.55 : v <= 4 ? 0.3 : 0.1), (all.totalDebt != null && all.totalCash ? all.totalDebt / all.totalCash : null));
+    push("debtVsCash", "Debt vs cash", weights.debtVsCash, (v) => (v < 0.5 ? 1 : v <= 1 ? 0.8 : v <= 2 ? 0.55 : v <= 4 ? 0.3 : 0.1), debtToCash);
     push("growthConsistency", "EPS consistency", weights.growthConsistency, (v) => byIndex(v, { 0: 1, 1: 0.8, 2: 0.6, 3: 0.3, 4: 0.1 }), overrides.growthConsistency);
     push("growthFundingQuality", "Earnings quality", weights.growthFundingQuality, (v) => byIndex(v, { 0: 1, 1: 0.8, 2: 0.6, 3: 0.35, 4: 0.1 }), overrides.growthFundingQuality);
   }
@@ -279,9 +288,8 @@ export function suggestScore(category, fundamentals, pctIV, globals, overrides =
 // --- Additive: server-side persistence needs a flat index of every stored
 // rubric factor (quant + judgment) across all categories, derived from
 // RUBRIC_DEF rather than hard-coded, so the two never drift apart.
-// `pctIV` is intentionally excluded — it is a computed valuation input
-// (price / IV at scoring time), not a fetchable or operator-set factor, and
-// it lives outside `quantitativeFields` for exactly that reason.
+// Derived fields such as pctIV are intentionally excluded: they are computed
+// score inputs, not fetchable or operator-set factors.
 export const CATEGORY_KEYS = Object.keys(RUBRIC_DEF);
 
 export const FACTOR_INDEX = Object.fromEntries(

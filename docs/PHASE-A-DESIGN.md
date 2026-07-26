@@ -36,7 +36,7 @@ snapshots, allocation signals, the stats bar, and screening.
 - An unpinned category is recomputed from current provider factors, operator
   judgments, and formula globals.
 - A pinned category displays the operator's retained value. The model value is
-  still computed and shown for comparison.
+  still computed and is shown beside the effective value only when it differs.
 - `curated_scores` preserves the operator's number across unpin/re-pin cycles.
 - `eps_pinned` independently protects operator-curated EPS while allowing live
   price refreshes.
@@ -124,10 +124,18 @@ ownership rule.
 
 ## UI
 
-Category grids expose fetched and manual values, model and effective scores,
-assessment coverage, and category pins. The Intrinsic Value tab exposes the
-separate EPS pin. Ticker Import is an addition workflow only: it cannot update
-or unpin existing rows.
+Main Score Card is a read-only rollup. Category grids are the single owners of
+category score inputs and expose fetched/manual factors, one effective Category
+Score, assessment coverage, and the category pin. Every displayed category
+factor maps to a declared score weight. Context-only provider fields such as
+sector and industry remain cached but are not presented as if they affected a
+score.
+
+Intrinsic Value owns EPS-source diagnostics, the operator's long-term IV
+growth assumption, and the separate EPS pin. Provider `TTM EPS Growth YoY`
+belongs to Growth and is distinct from that forward-looking assumption. P/E
+ratios belong to Valuation. Ticker Import is an addition workflow only: it
+cannot update or unpin existing rows.
 
 Navigation uses two levels. The top level contains Main Score Card, Docs, and
 Ticker Import. Main Score Card exposes the second-level workflow and

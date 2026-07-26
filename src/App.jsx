@@ -12,7 +12,6 @@ import AllocationTable from "./components/AllocationTable.jsx";
 import CategoryGrid from "./components/CategoryGrid.jsx";
 import ImportPanel from "./components/ImportPanel.jsx";
 import DocsPanel from "./components/DocsPanel.jsx";
-import ScoringWorksheet from "./components/ScoringWorksheet.jsx";
 import StatePanel from "./components/StatePanel.jsx";
 import { CATEGORY_KEYS } from "./lib/rubric.js";
 
@@ -31,10 +30,7 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [snapshotting, setSnapshotting] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState("");
-  const [yahooData, setYahooData] = useState({});
   const [showSettings, setShowSettings] = useState(false);
-  const [worksheet, setWorksheet] = useState(null);
-  const [worksheetLoading, setWorksheetLoading] = useState(null);
   const statusTimer = useRef(null);
 
   const markSaved = () => {
@@ -99,12 +95,8 @@ export default function App() {
     const pctIV = calcPctIV(s.currentPrice, iv);
     const score = calcScore(s);
     const sig = allocationSignals(s, iv, pctIV, score);
-    const pe = valuationTtmEps > 0 ? s.currentPrice / valuationTtmEps : null; // negative/absent EPS has no meaningful P/E
-    const forwardEps = yahooData[s.ticker]?.forwardEps ?? null;
-    const forwardPe = forwardEps > 0 ? s.currentPrice / forwardEps : null;
-    const quote = yahooData[s.ticker];
-    return { ...s, gaapTtmEps, adjustedTtmEps, valuationTtmEps, valuationEpsBasis, pe, forwardEps, forwardPe, iv, pctIV, score, ...sig };
-  }), [stocks, globals, yahooData]);
+    return { ...s, gaapTtmEps, adjustedTtmEps, valuationTtmEps, valuationEpsBasis, iv, pctIV, score, ...sig };
+  }), [stocks, globals]);
 
   const sorted = useMemo(() => {
     const arr = [...rows];
@@ -143,7 +135,7 @@ export default function App() {
   };
 
   // patch: { factorKey: value|null }. null clears an override; quant fields
-  // take a plain number (or string for sector/industry); judgment fields take
+  // take a plain number; judgment fields take
   // the option's numeric index. Server returns the authoritative factors +
   // computed for this ticker plus the possibly-recomputed stock row (an
   // unpinned category's score moves as soon as the underlying factor does).
@@ -236,7 +228,6 @@ export default function App() {
       }
       const payload = await res.json();
       const quoteMap = payload.quotes || {};
-      setYahooData(quoteMap);
       const savedStocks = Array.isArray(payload.stocks) ? payload.stocks : [];
       const savedByTicker = new Map(savedStocks.map((stock) => [stock.ticker, stock]));
       setStocks((prev) => prev.map((stock) => savedByTicker.get(stock.ticker) || stock));
@@ -292,59 +283,6 @@ export default function App() {
     avgScore: rows.length ? rows.reduce((a, r) => a + r.score, 0) / rows.length : 0,
   }), [rows]);
 
-
-  const handleOpenWorksheet = async (ticker, category) => {
-    const row = rows.find((r) => r.ticker === ticker);
-    const existing = yahooData[ticker]?.fundamentals;
-
-    if (existing) {
-      setWorksheet({
-        ticker,
-        category,
-        fundamentals: existing,
-        epsGrowthRate: yahooData[ticker]?.epsGrowthRate ?? null,
-        pctIV: row?.pctIV ?? null,
-        currentScore: row?.[category] ?? 0,
-      });
-      return;
-    }
-
-    const iconKey = `${ticker}-${category}`;
-    setWorksheetLoading(iconKey);
-    try {
-      const res = await fetch('/api/quotes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tickers: [ticker] }),
-      });
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(error.error || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      const quote = data.quotes?.[ticker];
-      setYahooData((prev) => ({ ...prev, [ticker]: { ...(prev[ticker] || {}), ...quote } }));
-      const savedStock = data.stocks?.find((stock) => stock.ticker === ticker);
-      if (savedStock) {
-        setStocks((prev) => prev.map((stock) => (stock.ticker === ticker ? savedStock : stock)));
-      }
-      setFactorsState((prev) => ({ ...prev, ...(data.factors || {}) }));
-      setComputedState((prev) => ({ ...prev, ...(data.computed || {}) }));
-      setWorksheet({
-        ticker,
-        category,
-        fundamentals: quote?.fundamentals ?? {},
-        epsGrowthRate: quote?.epsGrowthRate ?? null,
-        pctIV: row?.pctIV ?? null,
-        currentScore: row?.[category] ?? 0,
-      });
-    } catch (e) {
-      setRefreshMsg(`Failed to fetch data for ${ticker}: ${e.message}`);
-    } finally {
-      setWorksheetLoading(null);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <div className="grid-bg min-h-screen">
@@ -381,14 +319,13 @@ export default function App() {
           {topTab === "import" && <ImportPanel onImported={loadData} />}
           {!dataLoading && !dataError && topTab === "main" && (
             <>
-              {tab === "scorecard" && <ScoreCardTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} onOpenWorksheet={handleOpenWorksheet} worksheetLoading={worksheetLoading} />}
+              {tab === "scorecard" && <ScoreCardTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
               {tab === "intrinsic" && (
                 <IntrinsicTable
                   rows={sorted}
                   updateStock={updateStock}
                   removeStock={removeStock}
                   stocks={stocks}
-                  globals={globals}
                   sortBy={sortBy}
                   sortDir={sortDir}
                   sortToggle={sortToggle}
@@ -411,20 +348,6 @@ export default function App() {
               )}
             </>
           )}
-
-          {worksheet && (
-            <ScoringWorksheet
-              worksheet={worksheet}
-              onClose={() => setWorksheet(null)}
-              onApply={(ticker, category, score) => {
-                const idx = stocks.findIndex((stock) => stock.ticker === ticker);
-                if (idx !== -1) updateStock(idx, { [category]: score });
-                setWorksheet(null);
-              }}
-              globals={{ ...globals, epsGrowthRate: worksheet.epsGrowthRate }}
-            />
-          )}
-
           <div className="mt-8 text-[10px] text-zinc-600 font-mono leading-relaxed">
             <p>Scoring rubric (max 100): Valuation 20 · Growth 20 · Moat 20 · Execution Risk 10 · Economy 30. Score ≥75 = potential buy.</p>
             <p className="mt-1">Allocation signals are algorithmic defaults. Override per your conviction. Not financial advice.</p>

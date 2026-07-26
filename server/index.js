@@ -9,6 +9,8 @@ import { calcIV, calcPctIV, calcScore, allocationSignals } from "../src/lib/valu
 import { CATEGORY_KEYS, FACTOR_INDEX } from "../src/lib/rubric.js";
 import { fetchFundamentalsBatch, finnhubConfigured } from "./lib/finnhub.js";
 import { computeScores, coerceFactorValue } from "./lib/scoring.js";
+import { parseSheet } from "./lib/sheet.js";
+import { buildPreview, seedBaselineIfNeeded, MERGE_FIELDS } from "./lib/import.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -107,6 +109,23 @@ db.exec(`
     fetched_at TEXT NOT NULL,
     data       TEXT NOT NULL
   );
+
+  -- Three-way merge memory for sheet re-imports (S5): what the last import
+  -- wrote per (ticker, field), so a later import can tell the operator's own
+  -- edit from a Brandon revision. See docs/PHASE-A-DESIGN.md.
+  CREATE TABLE IF NOT EXISTS import_baseline (
+    ticker      TEXT NOT NULL,
+    field       TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    imported_at TEXT NOT NULL,
+    source      TEXT,
+    PRIMARY KEY (ticker, field)
+  );
+
+  CREATE TABLE IF NOT EXISTS import_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+  );
 `);
 
 // Migration: eps_pinned marks rows whose ttmEPS is operator/sheet-curated on a
@@ -191,6 +210,25 @@ const seedDatabase = db.transaction(() => {
 });
 
 seedDatabase();
+
+// Bootstrap import_baseline (S5) from the workbook that produced the current
+// data, if it's present locally; otherwise from current values on rows that
+// look sheet-curated. Guarded by an import_meta marker so this runs once.
+try {
+  const bootstrapWorkbookName = "260726 IWB STOCK SHEET 4.0.xlsx";
+  const bootstrapWorkbookPath = path.join(__dirname, "..", "data", "sheets", bootstrapWorkbookName);
+  const workbookBuffer = fs.existsSync(bootstrapWorkbookPath) ? fs.readFileSync(bootstrapWorkbookPath) : null;
+  const seedResult = seedBaselineIfNeeded(db, {
+    stocks: getStocks(),
+    workbookBuffer,
+    workbookSource: bootstrapWorkbookName,
+  });
+  if (seedResult.seeded) {
+    console.log(`import_baseline seeded (${seedResult.mode}, ${seedResult.rows} row(s))`);
+  }
+} catch (err) {
+  console.error("import_baseline bootstrap failed:", err.message);
+}
 
 app.use(express.json());
 app.use((error, req, res, next) => {
@@ -360,6 +398,18 @@ const upsertFundamentalsCache = db.prepare(`
   INSERT INTO fundamentals_cache (ticker, fetched_at, data)
   VALUES (@ticker, @fetchedAt, @data)
   ON CONFLICT (ticker) DO UPDATE SET fetched_at = excluded.fetched_at, data = excluded.data
+`);
+
+// Advances the three-way merge baseline for one (ticker, field) to whatever
+// value this import round reconciled against -- used both for fields the
+// import wrote to the stocks table (value == the new/theirs value) and for
+// conflicts the operator explicitly resolved by keeping their own value
+// (value == theirs, so a future import of the same workbook version doesn't
+// re-flag an already-decided conflict; see POST /api/import/apply).
+const upsertBaselineField = db.prepare(`
+  INSERT INTO import_baseline (ticker, field, value, imported_at, source)
+  VALUES (@ticker, @field, @value, @importedAt, @source)
+  ON CONFLICT (ticker, field) DO UPDATE SET value = excluded.value, imported_at = excluded.imported_at, source = excluded.source
 `);
 
 function getFundamentalsCache(ticker) {
@@ -782,50 +832,58 @@ const insertSnapshot = db.transaction((payload) => {
 // the DB, live price and fundamentals from the providers, IV/%IV/signals
 // computed with the shared formulas. Append-only — snapshots never mutate the
 // stocks table, and later model changes never rewrite old rows.
+// Shared by POST /api/snapshot and POST /api/import/apply (which must take
+// one before writing anything).
+async function takeSnapshot() {
+  const stocks = getStocks();
+  if (stocks.length === 0) throw apiError(400, "no stocks to snapshot");
+  const globals = getGlobals();
+  const quoteMap = await buildQuoteMap(stocks.map((s) => s.ticker));
+
+  const rows = stocks.map((s) => {
+    const quote = quoteMap[s.ticker] || null;
+    const currentPrice = quote?.currentPrice ?? quote?.previousClose ?? s.currentPrice;
+    const iv = calcIV(s.ttmEPS, s.growth, globals);
+    const pctIV = calcPctIV(currentPrice, iv);
+    const score = calcScore(s);
+    return {
+      ...s,
+      currentPrice,
+      priceSource: quote?.currentPrice != null ? "live" : quote?.previousClose != null ? "previousClose" : "stored",
+      iv,
+      pctIV,
+      score,
+      signals: allocationSignals(s, iv, pctIV, score),
+      factors: getFactorsMapForTicker(s.ticker),
+      quote: quote ? {
+        trailingEps: quote.trailingEps,
+        forwardEps: quote.forwardEps,
+        epsGrowthRate: quote.epsGrowthRate,
+        quoteType: quote.quoteType,
+        longName: quote.longName,
+      } : null,
+      fundamentals: quote?.fundamentals ?? null,
+    };
+  });
+
+  const payload = {
+    schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+    source: "kapman-fair-value-tool",
+    takenAt: new Date().toISOString(),
+    globals,
+    stocks: rows,
+  };
+  const runId = insertSnapshot(payload);
+  return { runId, ...payload };
+}
+
 app.post("/api/snapshot", async (req, res) => {
   try {
-    const stocks = getStocks();
-    if (stocks.length === 0) return res.status(400).json({ error: "no stocks to snapshot" });
-    const globals = getGlobals();
-    const quoteMap = await buildQuoteMap(stocks.map((s) => s.ticker));
-
-    const rows = stocks.map((s) => {
-      const quote = quoteMap[s.ticker] || null;
-      const currentPrice = quote?.currentPrice ?? quote?.previousClose ?? s.currentPrice;
-      const iv = calcIV(s.ttmEPS, s.growth, globals);
-      const pctIV = calcPctIV(currentPrice, iv);
-      const score = calcScore(s);
-      return {
-        ...s,
-        currentPrice,
-        priceSource: quote?.currentPrice != null ? "live" : quote?.previousClose != null ? "previousClose" : "stored",
-        iv,
-        pctIV,
-        score,
-        signals: allocationSignals(s, iv, pctIV, score),
-        factors: getFactorsMapForTicker(s.ticker),
-        quote: quote ? {
-          trailingEps: quote.trailingEps,
-          forwardEps: quote.forwardEps,
-          epsGrowthRate: quote.epsGrowthRate,
-          quoteType: quote.quoteType,
-          longName: quote.longName,
-        } : null,
-        fundamentals: quote?.fundamentals ?? null,
-      };
-    });
-
-    const payload = {
-      schemaVersion: SNAPSHOT_SCHEMA_VERSION,
-      source: "kapman-fair-value-tool",
-      takenAt: new Date().toISOString(),
-      globals,
-      stocks: rows,
-    };
-    const runId = insertSnapshot(payload);
-    res.status(201).json({ runId, ...payload });
+    const result = await takeSnapshot();
+    res.status(201).json(result);
   } catch (error) {
-    res.status(500).json({ error: error?.message || "internal server error" });
+    const status = error.status || 500;
+    res.status(status).json({ error: status === 500 ? (error?.message || "internal server error") : error.message });
   }
 });
 
@@ -854,6 +912,204 @@ app.get("/api/snapshots/:id", handleRoute((req, res) => {
   });
 }));
 
+// -- sheet import (S5) --------------------------------------------------------
+// Upload transport is deliberately raw bytes, not multipart: the client POSTs
+// the .xlsx File body directly with Content-Type: application/octet-stream,
+// which needs no parsing dependency beyond express.raw. The original
+// filename (for the "source" shown in the plan and recorded into
+// import_baseline) rides along in a request header since a raw body has no
+// place to carry it.
+const importUpload = express.raw({ type: "application/octet-stream", limit: "25mb" });
+
+app.post("/api/import/preview", importUpload, handleRoute((req, res) => {
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    throw apiError(400, "request body must be the raw bytes of an .xlsx workbook (Content-Type: application/octet-stream)");
+  }
+  const rawFilename = req.get("X-Import-Filename");
+  let source = "uploaded-workbook.xlsx";
+  if (rawFilename) {
+    try { source = decodeURIComponent(rawFilename); } catch (_) { source = rawFilename; }
+  }
+
+  let sheet;
+  try {
+    sheet = parseSheet(req.body);
+  } catch (error) {
+    // parseSheet's errors (corrupt zip, wrong tab, duplicate ticker, ...) are
+    // already descriptive and meant for a human to read -- surface verbatim.
+    throw apiError(400, error.message);
+  }
+
+  const stocks = getStocks();
+  const globals = getGlobals();
+  const baselineRows = db.prepare("SELECT ticker, field, value, imported_at, source FROM import_baseline").all();
+  res.json(buildPreview({ sheet, stocks, globals, baselineRows, source }));
+}));
+
+// Reshapes/validates the client's chosen subset of a preview into what the
+// stocks table actually needs. The client is expected to have derived these
+// straight from a prior /api/import/preview response -- see ImportPanel.jsx.
+function normalizeImportUpdates(payload) {
+  if (!Array.isArray(payload)) throw apiError(400, "updates must be an array");
+  return payload.map((entry, i) => {
+    if (!isPlainObject(entry)) throw apiError(400, `updates[${i}] must be an object`);
+    const ticker = normalizeTicker(entry.ticker, `updates[${i}].ticker`);
+    if (!isPlainObject(entry.fields)) throw apiError(400, `updates[${i}].fields must be an object`);
+    // Empty fields is only valid alongside pinEps: a row whose sheet values
+    // already match but wasn't pinned yet (see buildPreview's willPinEps).
+    if (Object.keys(entry.fields).length === 0 && entry.pinEps !== true) {
+      throw apiError(400, `updates[${i}].fields must be a non-empty object (or set pinEps)`);
+    }
+    const fields = {};
+    for (const [field, value] of Object.entries(entry.fields)) {
+      if (field === "updated") {
+        if (typeof value !== "string" || !value.trim()) throw apiError(400, `updates[${i}].fields.updated must be a non-empty string`);
+        fields.updated = value.trim();
+      } else if (NUMERIC_STOCK_FIELDS.has(field)) {
+        fields[field] = normalizeFiniteNumber(value, `updates[${i}].fields.${field}`);
+      } else {
+        throw apiError(400, `updates[${i}].fields: unknown field "${field}"`);
+      }
+    }
+    return { ticker, fields, pinEps: entry.pinEps === true };
+  });
+}
+
+// Conflicts the operator resolved (either direction) advance the baseline to
+// the workbook's value even when "mine" was kept, so a later import of the
+// same unchanged workbook doesn't re-flag a conflict already decided. They do
+// NOT by themselves write to the stocks table -- an entry resolved "theirs"
+// must also appear in that ticker's updates[].fields to actually be applied.
+function normalizeConflictResolutions(payload) {
+  if (payload == null) return [];
+  if (!Array.isArray(payload)) throw apiError(400, "conflictResolutions must be an array");
+  return payload.map((entry, i) => {
+    if (!isPlainObject(entry)) throw apiError(400, `conflictResolutions[${i}] must be an object`);
+    const ticker = normalizeTicker(entry.ticker, `conflictResolutions[${i}].ticker`);
+    if (!MERGE_FIELDS.includes(entry.field)) {
+      throw apiError(400, `conflictResolutions[${i}].field must be one of ${MERGE_FIELDS.join(", ")}`);
+    }
+    if (entry.resolution !== "mine" && entry.resolution !== "theirs") {
+      throw apiError(400, `conflictResolutions[${i}].resolution must be "mine" or "theirs"`);
+    }
+    const theirs = normalizeFiniteNumber(entry.theirs, `conflictResolutions[${i}].theirs`);
+    return { ticker, field: entry.field, resolution: entry.resolution, theirs };
+  });
+}
+
+function normalizeImportAdds(payload) {
+  if (payload == null) return [];
+  if (!Array.isArray(payload)) throw apiError(400, "addTickers must be an array");
+  // Sheet-imported rows land fully pinned, same as scripts/import-sheet.py's
+  // POST /api/stocks calls -- Brandon's workbook gives final judgment
+  // numbers with no constituent breakdown to import from.
+  return payload.map((entry) => normalizeStockPayload({ ...entry, epsPinned: true }));
+}
+
+app.post("/api/import/apply", async (req, res) => {
+  try {
+    const body = req.body;
+    if (!isPlainObject(body)) throw apiError(400, "request body must be a JSON object");
+    if (typeof body.source !== "string" || !body.source.trim()) throw apiError(400, "source is required");
+    const source = body.source.trim();
+
+    const updates = normalizeImportUpdates(body.updates || []);
+    const conflictResolutions = normalizeConflictResolutions(body.conflictResolutions);
+    const adds = normalizeImportAdds(body.addTickers);
+
+    if (updates.length === 0 && adds.length === 0 && conflictResolutions.length === 0) {
+      throw apiError(400, "nothing to apply: updates, addTickers, and conflictResolutions are all empty");
+    }
+
+    // Snapshot first, unconditionally, before any write -- any import is
+    // then recoverable from GET /api/snapshots regardless of what happens next.
+    let snapshot;
+    try {
+      snapshot = await takeSnapshot();
+    } catch (error) {
+      throw apiError(error.status || 500, `snapshot failed, import aborted: ${error.message}`);
+    }
+
+    const errors = [];
+    let updatedCount = 0;
+    let addedCount = 0;
+
+    // One transaction for all the writes below: a mid-batch failure on one
+    // ticker is caught and reported per-ticker (see try/catch inside each
+    // loop) rather than allowed to escape and roll back everyone else's
+    // otherwise-valid changes.
+    db.transaction(() => {
+      const now = new Date().toISOString();
+      const baselineWrites = new Map(); // "TICKER::field" -> value
+
+      for (const { ticker, fields, pinEps } of updates) {
+        try {
+          const current = getStockByTicker(ticker);
+          if (!current) throw new Error(`stock ${ticker} not found`);
+
+          const patch = {};
+          for (const [field, value] of Object.entries(fields)) {
+            patch[stockColumnByField[field]] = value;
+            if (MERGE_FIELDS.includes(field)) baselineWrites.set(`${ticker}::${field}`, value);
+          }
+          if (pinEps) patch.eps_pinned = 1;
+
+          // A score field arriving here becomes the curated value of record
+          // for that category, and pins it -- matching PUT /api/stocks/:ticker
+          // and this task's "pin imported score categories" requirement.
+          const editedCategories = CATEGORY_KEYS.filter((c) => fields[c] != null);
+          if (editedCategories.length > 0) {
+            const curated = { ...current.curatedScores, ...Object.fromEntries(editedCategories.map((c) => [c, fields[c]])) };
+            patch.curated_scores = JSON.stringify(curated);
+            const pinnedSet = new Set(current.pinnedCategories);
+            editedCategories.forEach((c) => pinnedSet.add(c));
+            patch.pinned_categories = CATEGORY_KEYS.filter((c) => pinnedSet.has(c)).join(",");
+          }
+
+          const assignments = Object.keys(patch).map((column) => `${column} = @${column}`);
+          db.prepare(`UPDATE stocks SET ${assignments.join(", ")} WHERE ticker = @ticker`).run({ ...patch, ticker });
+          updatedCount++;
+        } catch (error) {
+          errors.push(`${ticker}: ${error.message}`);
+        }
+      }
+
+      for (const { ticker, field, theirs } of conflictResolutions) {
+        baselineWrites.set(`${ticker}::${field}`, theirs);
+      }
+      for (const [key, value] of baselineWrites) {
+        const [ticker, field] = key.split("::");
+        upsertBaselineField.run({ ticker, field, value: String(value), importedAt: now, source });
+      }
+
+      for (const stock of adds) {
+        try {
+          if (getStockByTicker(stock.ticker)) throw new Error(`stock ${stock.ticker} already exists`);
+          const nextPosition = db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS position FROM stocks").get().position;
+          insertStock.run({
+            epsPinned: 0,
+            pinnedCategories: CATEGORY_KEYS.join(","),
+            ...stock,
+            curatedScores: JSON.stringify(Object.fromEntries(CATEGORY_KEYS.map((c) => [c, stock[c]]))),
+            position: nextPosition,
+          });
+          for (const field of MERGE_FIELDS) {
+            if (stock[field] != null) upsertBaselineField.run({ ticker: stock.ticker, field, value: String(stock[field]), importedAt: now, source });
+          }
+          addedCount++;
+        } catch (error) {
+          errors.push(`${stock.ticker}: ${error.message}`);
+        }
+      }
+    })();
+
+    res.status(201).json({ snapshotRunId: snapshot.runId, updated: updatedCount, added: addedCount, errors });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ error: status === 500 ? (error?.message || "internal server error") : error.message });
+  }
+});
+
 // Serve built frontend. Vite assets are content-hashed -> cache forever;
 // index.html must never be cached or browsers keep running stale app code
 // against a newer API after deploys.
@@ -873,6 +1129,21 @@ app.use(express.static(distDir, {
 app.get(/^\/(?!api).*/, (req, res) => {
   res.set("Cache-Control", "no-store");
   res.sendFile(path.join(distDir, "index.html"));
+});
+
+// Final error handler: catches body-parser failures from ANY route's body
+// middleware (express.json() above, and /api/import/preview's express.raw())
+// regardless of where in the stack they were registered -- Express only
+// walks forward from the point of failure, so this must be last to see
+// everyone's errors, not just the ones after the first handler near the top.
+app.use((error, req, res, next) => {
+  if (error && (error.type === "entity.too.large" || error.status === 413)) {
+    return res.status(400).json({ error: "upload too large (max 25mb)" });
+  }
+  if (error instanceof SyntaxError && "body" in error) {
+    return res.status(400).json({ error: "request body must be valid JSON" });
+  }
+  res.status(error?.status || 500).json({ error: error?.message || "internal server error" });
 });
 
 app.listen(PORT, "0.0.0.0", () => {

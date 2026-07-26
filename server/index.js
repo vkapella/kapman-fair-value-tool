@@ -28,6 +28,8 @@ const REQUIRED_STOCK_FIELDS = STOCK_FIELDS.filter((field) => !OPTIONAL_STOCK_FIE
 const NUMERIC_STOCK_FIELDS = new Set(["ttmEPS", "growth", "currentPrice", "valuation", "growthScore", "moat", "executionRisk", "economy"]);
 const GLOBAL_FIELDS = ["peNoGrowth", "g", "avgYieldAAA", "bondYield"];
 const GLOBAL_FIELD_SET = new Set(GLOBAL_FIELDS);
+const SCORE_INPUT_STOCK_FIELDS = new Set(["ttmEPS", "growth", "currentPrice", "pinnedCategories"]);
+const FUND_QUOTE_TYPES = new Set(["ETF", "MUTUALFUND"]);
 
 const stockColumnByField = {
   ticker: "ticker",
@@ -296,6 +298,17 @@ function normalizeFiniteNumber(value, field) {
   const number = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(number)) throw apiError(400, `${field} must be a finite number`);
   return number;
+}
+
+function todayShort() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    month: "numeric",
+    day: "numeric",
+    year: "2-digit",
+  }).formatToParts(new Date());
+  const byType = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${byType.month}/${byType.day}/${byType.year}`;
 }
 
 function assertKnownFields(payload, allowedFields) {
@@ -728,7 +741,7 @@ app.put("/api/stocks/:ticker", handleRoute((req, res) => {
   }
 
   const assignments = Object.keys(patch).map((field) => `${stockColumnByField[field]} = @${field}`);
-  db.transaction(() => {
+  const result = db.transaction(() => {
     db.prepare(`UPDATE stocks SET ${assignments.join(", ")} WHERE ticker = @currentTicker`).run({ ...patch, currentTicker });
 
     // A rename has to carry the ticker's factors and cached fundamentals with
@@ -741,11 +754,12 @@ app.put("/api/stocks/:ticker", handleRoute((req, res) => {
     // Pinning/unpinning changes which columns are "live"; recompute immediately
     // so a newly-unpinned category doesn't sit stale until the next factor edit
     // or quotes refresh happens to touch it.
-    if (Object.prototype.hasOwnProperty.call(patch, "pinnedCategories")) {
-      recomputeScoresForTicker(nextTicker);
-    }
+    const affectsComputedScores = Object.keys(patch).some((field) => SCORE_INPUT_STOCK_FIELDS.has(field));
+    return affectsComputedScores
+      ? recomputeScoresForTicker(nextTicker)
+      : { stock: getStockByTicker(nextTicker), computed: computeScoresForTicker(nextTicker) };
   })();
-  res.json(getStockByTicker(nextTicker));
+  res.json(result);
 }));
 
 app.put("/api/factors/:ticker", handleRoute((req, res) => {
@@ -780,8 +794,15 @@ app.delete("/api/stocks/:ticker", handleRoute((req, res) => {
 app.put("/api/globals", handleRoute((req, res) => {
   const patch = normalizeGlobalsPayload(req.body);
   const assignments = Object.keys(patch).map((field) => `${globalColumnByField[field]} = @${field}`);
-  db.prepare(`UPDATE globals SET ${assignments.join(", ")} WHERE id = 1`).run(patch);
-  res.json(getGlobals());
+  const result = db.transaction(() => {
+    db.prepare(`UPDATE globals SET ${assignments.join(", ")} WHERE id = 1`).run(patch);
+    const computed = {};
+    for (const stock of getStocks()) {
+      computed[stock.ticker] = recomputeScoresForTicker(stock.ticker).computed;
+    }
+    return { globals: getGlobals(), stocks: getStocks(), computed };
+  })();
+  res.json(result);
 }));
 
 app.post("/api/prices", async (req, res) => {
@@ -900,15 +921,23 @@ async function buildQuoteMap(normalized) {
 // out of sync.
 function persistQuotesAndRecompute(tickers, quoteMap) {
   const now = new Date().toISOString();
-  const trackedTickers = new Set(getStocks().map((s) => s.ticker));
-  const toRecompute = [];
+  const trackedTickers = new Map(getStocks().map((stock) => [stock.ticker, stock]));
+  const updatePrice = db.prepare("UPDATE stocks SET current_price = ? WHERE ticker = ?");
+  const updatePriceAndEps = db.prepare(
+    "UPDATE stocks SET current_price = @currentPrice, ttm_eps = @ttmEPS, updated = @updated WHERE ticker = @ticker"
+  );
 
-  db.transaction(() => {
+  return db.transaction(() => {
+    const stocks = [];
+    const factors = {};
+    const computed = {};
+
     for (const ticker of tickers) {
       const quote = quoteMap[ticker];
       if (!quote) continue;
       upsertFundamentalsCache.run({ ticker, fetchedAt: now, data: JSON.stringify(quote) });
-      if (!trackedTickers.has(ticker)) continue;
+      const stock = trackedTickers.get(ticker);
+      if (!stock) continue;
 
       for (const [key, info] of Object.entries(FACTOR_INDEX)) {
         if (info.kind !== "quant") continue;
@@ -916,9 +945,25 @@ function persistQuotesAndRecompute(tickers, quoteMap) {
         if (value == null) continue;
         upsertFactorFetched.run({ ticker, factorKey: key, category: info.category, kind: info.kind, fetchedValue: String(value), fetchedAt: now, updated: now });
       }
-      toRecompute.push(ticker);
+
+      const currentPrice = quote.currentPrice ?? quote.previousClose;
+      if (currentPrice != null) {
+        const mayRefreshEps = !stock.epsPinned
+          && !FUND_QUOTE_TYPES.has(quote.quoteType)
+          && quote.trailingEps != null;
+        if (mayRefreshEps) {
+          updatePriceAndEps.run({ ticker, currentPrice, ttmEPS: quote.trailingEps, updated: todayShort() });
+        } else {
+          updatePrice.run(currentPrice, ticker);
+        }
+      }
+
+      const result = recomputeScoresForTicker(ticker);
+      stocks.push(result.stock);
+      factors[ticker] = getFactorsMapForTicker(ticker);
+      computed[ticker] = result.computed;
     }
-    for (const ticker of toRecompute) recomputeScoresForTicker(ticker);
+    return { stocks, factors, computed };
   })();
 }
 
@@ -931,8 +976,8 @@ app.post("/api/quotes", async (req, res) => {
   try {
     const normalized = [...new Set(tickers.map((raw) => String(raw || "").trim().toUpperCase()).filter(Boolean))];
     const quoteMap = await buildQuoteMap(normalized);
-    persistQuotesAndRecompute(normalized, quoteMap);
-    res.json(quoteMap);
+    const saved = persistQuotesAndRecompute(normalized, quoteMap);
+    res.json({ quotes: quoteMap, ...saved });
   } catch (error) {
     res.status(500).json({ error: error?.message || "internal server error" });
   }

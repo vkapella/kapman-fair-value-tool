@@ -73,22 +73,6 @@ export default function App() {
     }
   };
 
-  // Re-pulls stocks/factors/computed after anything server-side may have
-  // changed them without a corresponding local patch -- specifically
-  // /api/quotes, which persists fetched factor values and recomputes every
-  // unpinned category's score for the whole batch in one transaction. A
-  // full GET is the only way the client learns about those recomputed
-  // scores; it deliberately skips dataLoading/dataError so it never flashes
-  // the loading screen over an already-rendered page.
-  const resyncFactorsAndComputed = async () => {
-    try {
-      const data = await apiRequest("/api/data");
-      setStocks(Array.isArray(data.stocks) ? data.stocks : SEED_STOCKS);
-      setFactorsState(data.factors || {});
-      setComputedState(data.computed || {});
-    } catch (_) { /* best effort -- UI keeps showing last known good state */ }
-  };
-
   useEffect(() => {
     loadData();
     return () => {
@@ -128,13 +112,17 @@ export default function App() {
 
     setStorageStatus("saving");
     try {
-      const saved = await apiRequest(`/api/stocks/${encodeURIComponent(current.ticker)}`, {
+      const result = await apiRequest(`/api/stocks/${encodeURIComponent(current.ticker)}`, {
         method: "PUT",
         body: JSON.stringify(patch),
       });
+      const saved = result.stock || result;
       setStocks((prev) => prev.map((stock, stockIdx) => (
         stockIdx === idx || stock.ticker === current.ticker ? saved : stock
       )));
+      if (result.computed) {
+        setComputedState((prev) => ({ ...prev, [saved.ticker]: result.computed }));
+      }
       markSaved();
     } catch (error) {
       showSaveError(error.message);
@@ -205,7 +193,9 @@ export default function App() {
         method: "PUT",
         body: JSON.stringify(next),
       });
-      setGlobalsState(saved);
+      setGlobalsState(saved.globals);
+      setStocks(Array.isArray(saved.stocks) ? saved.stocks : stocks);
+      setComputedState(saved.computed || {});
       markSaved();
     } catch (error) {
       showSaveError(error.message);
@@ -231,52 +221,20 @@ export default function App() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
-      const quoteMap = await res.json();
+      const payload = await res.json();
+      const quoteMap = payload.quotes || {};
       setYahooData(quoteMap);
-
-      const today = todayShort();
-      const updates = stocks.map((stock) => {
-        const quote = quoteMap[stock.ticker];
-        if (!quote) return null;
-
-        const patch = {};
-        const price = quote.currentPrice ?? quote.previousClose;
-        if (price != null) patch.currentPrice = price;
-        // `updated` moves only when the valuation denominator (EPS) refreshes.
-        // A price-only refresh must keep the old date, or a row with frozen
-        // EPS advertises itself as current while its IV drifts stale.
-        // Pinned rows (sheet-curated EPS on a basis providers can't reproduce,
-        // e.g. BRK.B operating earnings) are price-only by design.
-        if (!stock.epsPinned && !isFundQuote(quote) && quote.trailingEps != null) {
-          patch.ttmEPS = quote.trailingEps;
-          patch.updated = today;
-        }
-        // Never auto-overwrite `growth`: it is the operator's curated forward
-        // 7-10yr estimate (Graham input). Fetched trailing YoY growth remains
-        // visible in the valuation worksheet as reference only.
-
-        return Object.keys(patch).length > 0 ? { stock, patch } : null;
-      }).filter(Boolean);
-
-      const savedStocks = await Promise.all(
-        updates.map(({ stock, patch }) =>
-          apiRequest(`/api/stocks/${encodeURIComponent(stock.ticker)}`, {
-          method: "PUT",
-          body: JSON.stringify(patch),
-        }).then((saved) => ({ oldTicker: stock.ticker, saved }))
-      )
-      );
-      const savedByTicker = new Map(
-        savedStocks.map(({ oldTicker, saved }) => [oldTicker, saved])
-      );
-      setStocks((prev) => prev.map((s) => savedByTicker.get(s.ticker) || s));
-      // /api/quotes already persisted fetched factor values and recomputed
-      // every unpinned category server-side; pull the authoritative result
-      // (also supersedes the optimistic merge above for those columns).
-      await resyncFactorsAndComputed();
-      const priceOnly = updates
-        .filter(({ patch }) => patch.ttmEPS == null)
-        .map(({ stock }) => stock.ticker);
+      const savedStocks = Array.isArray(payload.stocks) ? payload.stocks : [];
+      const savedByTicker = new Map(savedStocks.map((stock) => [stock.ticker, stock]));
+      setStocks((prev) => prev.map((stock) => savedByTicker.get(stock.ticker) || stock));
+      setFactorsState((prev) => ({ ...prev, ...(payload.factors || {}) }));
+      setComputedState((prev) => ({ ...prev, ...(payload.computed || {}) }));
+      const priceOnly = stocks
+        .filter((stock) => {
+          const quote = quoteMap[stock.ticker];
+          return quote && (stock.epsPinned || isFundQuote(quote) || quote.trailingEps == null);
+        })
+        .map((stock) => stock.ticker);
       setRefreshMsg(
         priceOnly.length === 0
           ? `Updated ${savedStocks.length}/${stocks.length} rows`
@@ -346,14 +304,19 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tickers: [ticker] }),
       });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || `HTTP ${res.status}`);
+      }
       const data = await res.json();
-      const quote = data[ticker];
+      const quote = data.quotes?.[ticker];
       setYahooData((prev) => ({ ...prev, [ticker]: { ...(prev[ticker] || {}), ...quote } }));
-      // Same server-side persist-and-recompute as refreshPrices, just for one
-      // ticker; don't await it here so opening the worksheet stays snappy —
-      // the category grids will pick up the fresh factor/computed values
-      // whenever this settles.
-      resyncFactorsAndComputed();
+      const savedStock = data.stocks?.find((stock) => stock.ticker === ticker);
+      if (savedStock) {
+        setStocks((prev) => prev.map((stock) => (stock.ticker === ticker ? savedStock : stock)));
+      }
+      setFactorsState((prev) => ({ ...prev, ...(data.factors || {}) }));
+      setComputedState((prev) => ({ ...prev, ...(data.computed || {}) }));
       setWorksheet({
         ticker,
         category,

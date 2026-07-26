@@ -6,6 +6,17 @@ import EmptyTableRow from "./EmptyTableRow.jsx";
 import Legend from "./Legend.jsx";
 import { ivColor, scoreColor } from "../lib/format.js";
 
+// Matches the SortHeader columns below (label + max stay hard-coded here to
+// keep this table's header text exactly as before -- only the repeated cell
+// markup is deduped).
+const CATEGORY_COLUMNS = [
+  { key: "valuation", max: 20 },
+  { key: "growthScore", max: 20 },
+  { key: "moat", max: 20 },
+  { key: "executionRisk", max: 10 },
+  { key: "economy", max: 30 },
+];
+
 export default function ScoreCardTable({ rows, updateStock, removeStock, stocks, sortBy, sortDir, sortToggle, onOpenWorksheet, worksheetLoading }) {
   return (
     <div className="rounded-lg border border-zinc-800 overflow-hidden bg-zinc-950">
@@ -38,11 +49,22 @@ export default function ScoreCardTable({ rows, updateStock, removeStock, stocks,
                 <tr key={r.ticker} className="hairline hover:bg-zinc-900/30 group">
                   <td className="px-3 py-2"><TextCell value={r.ticker} onChange={(v) => updateStock(idx, { ticker: v })} width="w-16" uppercase /></td>
                   <td className="px-2 py-2 text-right"><span className={`tabular-nums font-mono text-xs ${ivColor(r.pctIV)}`}>{r.pctIV.toFixed(2)}%</span></td>
-                  <td className="px-2 py-2 text-right"><div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}><NumCell value={r.valuation} onChange={(v) => updateStock(idx, { valuation: v })} decimals={0} max={20} width="w-14" /><button onClick={(e) => { e.stopPropagation(); onOpenWorksheet(r.ticker, "valuation"); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-emerald-400 transition text-[10px] leading-none" title="Open scoring worksheet"><span className={worksheetLoading === `${r.ticker}-valuation` ? "animate-spin inline-block" : ""}>{worksheetLoading === `${r.ticker}-valuation` ? "↻" : "ⓘ"}</span></button></div></td>
-                  <td className="px-2 py-2 text-right"><div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}><NumCell value={r.growthScore} onChange={(v) => updateStock(idx, { growthScore: v })} decimals={0} max={20} width="w-14" /><button onClick={(e) => { e.stopPropagation(); onOpenWorksheet(r.ticker, "growthScore"); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-emerald-400 transition text-[10px] leading-none" title="Open scoring worksheet"><span className={worksheetLoading === `${r.ticker}-growthScore` ? "animate-spin inline-block" : ""}>{worksheetLoading === `${r.ticker}-growthScore` ? "↻" : "ⓘ"}</span></button></div></td>
-                  <td className="px-2 py-2 text-right"><div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}><NumCell value={r.moat} onChange={(v) => updateStock(idx, { moat: v })} decimals={0} max={20} width="w-14" /><button onClick={(e) => { e.stopPropagation(); onOpenWorksheet(r.ticker, "moat"); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-emerald-400 transition text-[10px] leading-none" title="Open scoring worksheet"><span className={worksheetLoading === `${r.ticker}-moat` ? "animate-spin inline-block" : ""}>{worksheetLoading === `${r.ticker}-moat` ? "↻" : "ⓘ"}</span></button></div></td>
-                  <td className="px-2 py-2 text-right"><div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}><NumCell value={r.executionRisk} onChange={(v) => updateStock(idx, { executionRisk: v })} decimals={0} max={10} width="w-14" /><button onClick={(e) => { e.stopPropagation(); onOpenWorksheet(r.ticker, "executionRisk"); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-emerald-400 transition text-[10px] leading-none" title="Open scoring worksheet"><span className={worksheetLoading === `${r.ticker}-executionRisk` ? "animate-spin inline-block" : ""}>{worksheetLoading === `${r.ticker}-executionRisk` ? "↻" : "ⓘ"}</span></button></div></td>
-                  <td className="px-2 py-2 text-right"><div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}><NumCell value={r.economy} onChange={(v) => updateStock(idx, { economy: v })} decimals={0} max={30} width="w-14" /><button onClick={(e) => { e.stopPropagation(); onOpenWorksheet(r.ticker, "economy"); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-emerald-400 transition text-[10px] leading-none" title="Open scoring worksheet"><span className={worksheetLoading === `${r.ticker}-economy` ? "animate-spin inline-block" : ""}>{worksheetLoading === `${r.ticker}-economy` ? "↻" : "ⓘ"}</span></button></div></td>
+                  {CATEGORY_COLUMNS.map(({ key, max }) => {
+                    const unpinned = !(r.pinnedCategories || []).includes(key);
+                    return (
+                      <td key={key} className="px-2 py-2 text-right">
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
+                          {unpinned && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" title="Unpinned — this number is recalculated from the factors and will change on the next refresh or factor edit." />
+                          )}
+                          <NumCell value={r[key]} onChange={(v) => updateStock(idx, { [key]: v })} decimals={0} max={max} width="w-14" />
+                          <button onClick={(e) => { e.stopPropagation(); onOpenWorksheet(r.ticker, key); }} className="text-zinc-600 hover:text-emerald-400 transition text-[10px] leading-none" title="Open scoring worksheet">
+                            <span className={worksheetLoading === `${r.ticker}-${key}` ? "animate-spin inline-block" : ""}>{worksheetLoading === `${r.ticker}-${key}` ? "↻" : "ⓘ"}</span>
+                          </button>
+                        </div>
+                      </td>
+                    );
+                  })}
                   <td className="px-2 py-2 text-right">
                     <span className={`inline-flex items-center justify-center w-12 py-1 rounded font-mono font-bold text-xs ${scoreColor(r.score)}`}>{r.score}</span>
                   </td>

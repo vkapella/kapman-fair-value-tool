@@ -9,8 +9,11 @@ import TabBar from "./components/TabBar.jsx";
 import ScoreCardTable from "./components/ScoreCardTable.jsx";
 import IntrinsicTable from "./components/IntrinsicTable.jsx";
 import AllocationTable from "./components/AllocationTable.jsx";
+import CategoryGrid from "./components/CategoryGrid.jsx";
+import ImportPanel from "./components/ImportPanel.jsx";
 import ScoringWorksheet from "./components/ScoringWorksheet.jsx";
 import StatePanel from "./components/StatePanel.jsx";
+import { CATEGORY_KEYS } from "./lib/rubric.js";
 
 // Funds have no provider EPS (Finnhub /stock/metric and Yahoo key statistics
 // both return nothing for ETFs), so their ttmEPS is operator-curated like
@@ -20,6 +23,8 @@ const isFundQuote = (quote) => FUND_QUOTE_TYPES.has(quote?.quoteType);
 
 export default function App() {
   const [stocks, setStocks] = useState([]);
+  const [factors, setFactorsState] = useState({});
+  const [computed, setComputedState] = useState({});
   const [globals, setGlobalsState] = useState(DEFAULT_GLOBALS);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState("");
@@ -57,6 +62,8 @@ export default function App() {
       const data = await apiRequest("/api/data");
       setStocks(Array.isArray(data.stocks) ? data.stocks : SEED_STOCKS);
       setGlobalsState({ ...DEFAULT_GLOBALS, ...(data.globals || {}) });
+      setFactorsState(data.factors || {});
+      setComputedState(data.computed || {});
       setStorageStatus("idle");
     } catch (error) {
       setDataError(error.message);
@@ -64,6 +71,22 @@ export default function App() {
     } finally {
       setDataLoading(false);
     }
+  };
+
+  // Re-pulls stocks/factors/computed after anything server-side may have
+  // changed them without a corresponding local patch -- specifically
+  // /api/quotes, which persists fetched factor values and recomputes every
+  // unpinned category's score for the whole batch in one transaction. A
+  // full GET is the only way the client learns about those recomputed
+  // scores; it deliberately skips dataLoading/dataError so it never flashes
+  // the loading screen over an already-rendered page.
+  const resyncFactorsAndComputed = async () => {
+    try {
+      const data = await apiRequest("/api/data");
+      setStocks(Array.isArray(data.stocks) ? data.stocks : SEED_STOCKS);
+      setFactorsState(data.factors || {});
+      setComputedState(data.computed || {});
+    } catch (_) { /* best effort -- UI keeps showing last known good state */ }
   };
 
   useEffect(() => {
@@ -112,6 +135,27 @@ export default function App() {
       setStocks((prev) => prev.map((stock, stockIdx) => (
         stockIdx === idx || stock.ticker === current.ticker ? saved : stock
       )));
+      markSaved();
+    } catch (error) {
+      showSaveError(error.message);
+    }
+  };
+
+  // patch: { factorKey: value|null }. null clears an override; quant fields
+  // take a plain number (or string for sector/industry); judgment fields take
+  // the option's numeric index. Server returns the authoritative factors +
+  // computed for this ticker plus the possibly-recomputed stock row (an
+  // unpinned category's score moves as soon as the underlying factor does).
+  const updateFactor = async (ticker, patch) => {
+    setStorageStatus("saving");
+    try {
+      const res = await apiRequest(`/api/factors/${encodeURIComponent(ticker)}`, {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      });
+      setFactorsState((prev) => ({ ...prev, [ticker]: res.factors }));
+      setComputedState((prev) => ({ ...prev, [ticker]: res.computed }));
+      setStocks((prev) => prev.map((stock) => (stock.ticker === ticker ? res.stock : stock)));
       markSaved();
     } catch (error) {
       showSaveError(error.message);
@@ -226,6 +270,10 @@ export default function App() {
         savedStocks.map(({ oldTicker, saved }) => [oldTicker, saved])
       );
       setStocks((prev) => prev.map((s) => savedByTicker.get(s.ticker) || s));
+      // /api/quotes already persisted fetched factor values and recomputed
+      // every unpinned category server-side; pull the authoritative result
+      // (also supersedes the optimistic merge above for those columns).
+      await resyncFactorsAndComputed();
       const priceOnly = updates
         .filter(({ patch }) => patch.ttmEPS == null)
         .map(({ stock }) => stock.ticker);
@@ -299,6 +347,11 @@ export default function App() {
       const data = await res.json();
       const quote = data[ticker];
       setYahooData((prev) => ({ ...prev, [ticker]: { ...(prev[ticker] || {}), ...quote } }));
+      // Same server-side persist-and-recompute as refreshPrices, just for one
+      // ticker; don't await it here so opening the worksheet stays snappy —
+      // the category grids will pick up the fresh factor/computed values
+      // whenever this settles.
+      resyncFactorsAndComputed();
       setWorksheet({
         ticker,
         category,
@@ -362,6 +415,21 @@ export default function App() {
                 />
               )}
               {tab === "allocation" && <AllocationTable rows={sorted} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
+              {CATEGORY_KEYS.includes(tab) && (
+                <CategoryGrid
+                  category={tab}
+                  rows={sorted}
+                  stocks={stocks}
+                  factors={factors}
+                  computed={computed}
+                  updateStock={updateStock}
+                  updateFactor={updateFactor}
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  sortToggle={sortToggle}
+                />
+              )}
+              {tab === "import" && <ImportPanel />}
             </>
           )}
 

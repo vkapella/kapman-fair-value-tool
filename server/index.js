@@ -122,9 +122,17 @@ if (!db.prepare("PRAGMA table_info(stocks)").all().some((c) => c.name === "eps_p
 // category for every existing row. Without this, the very next recompute
 // (e.g. the next /api/quotes refresh) would silently overwrite every
 // pre-existing score with a cold-start computed value.
+// The ALTER and the pinning UPDATE MUST be one transaction. Run as two
+// autocommit statements, a crash in between leaves the column present but
+// empty -- and the existence guard then skips the UPDATE forever, so every
+// row stays unpinned and the next refresh silently recomputes over all of
+// them (reproduced: QQQ 82 -> 54, BRK.B 77 -> 56). Atomic means the guard
+// correctly retries on the next boot instead.
 if (!db.prepare("PRAGMA table_info(stocks)").all().some((c) => c.name === "pinned_categories")) {
-  db.exec("ALTER TABLE stocks ADD COLUMN pinned_categories TEXT NOT NULL DEFAULT ''");
-  db.prepare("UPDATE stocks SET pinned_categories = ?").run(CATEGORY_KEYS.join(","));
+  db.transaction(() => {
+    db.exec("ALTER TABLE stocks ADD COLUMN pinned_categories TEXT NOT NULL DEFAULT ''");
+    db.prepare("UPDATE stocks SET pinned_categories = ?").run(CATEGORY_KEYS.join(","));
+  })();
 }
 
 const insertStock = db.prepare(`
@@ -474,9 +482,13 @@ app.post("/api/stocks", handleRoute((req, res) => {
   if (getStockByTicker(stock.ticker)) throw apiError(409, `stock ${stock.ticker} already exists`);
 
   const nextPosition = db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS position FROM stocks").get().position;
-  // New stocks default unpinned: no curated score to protect, so the model
-  // computes them from factors as soon as any are supplied.
-  insertStock.run({ epsPinned: 0, pinnedCategories: "", ...stock, position: nextPosition });
+  // New stocks default to fully PINNED, matching the migration and seed paths:
+  // the five scores are required fields, so every caller supplies real numbers
+  // -- the sheet importer supplies Brandon's curated scores. Defaulting to
+  // unpinned made the next /api/quotes recompute silently replace them with
+  // cold-start neutral values (a 78 import landed as 59, dropping the name out
+  // of the buy zone). Curated by default; opt into the model by unpinning.
+  insertStock.run({ epsPinned: 0, pinnedCategories: CATEGORY_KEYS.join(","), ...stock, position: nextPosition });
   res.status(201).json(getStockByTicker(stock.ticker));
 }));
 

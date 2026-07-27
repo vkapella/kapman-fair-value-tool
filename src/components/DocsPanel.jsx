@@ -5,6 +5,7 @@ import {
   SCORECARD_METHODOLOGY,
   SCORE_WEIGHTS,
 } from "../lib/rubric.js";
+import { DEFAULT_GLOBALS } from "../lib/defaultData.js";
 
 const pct = (value) => `${Math.round(value * 100)}%`;
 
@@ -62,6 +63,67 @@ function Methodology({ category }) {
   );
 }
 
+function IntrinsicValueMethodology() {
+  const settings = [
+    ["P/E no-growth", DEFAULT_GLOBALS.peNoGrowth, "Global base multiple in the modified-Graham formula. Change it in Settings to update every ticker immediately."],
+    ["Growth Multiplier", DEFAULT_GLOBALS.g, "Global coefficient applied to IV Growth Assumption %. Change it in Settings to update every ticker immediately."],
+    ["Average AAA Yield", `${DEFAULT_GLOBALS.avgYieldAAA}%`, "Global reference yield in the interest-rate adjustment. Change it in Settings to update every ticker immediately."],
+    ["Bond Yield", `${DEFAULT_GLOBALS.bondYield}%`, "Global current bond yield in the interest-rate adjustment. Change it in Settings to update every ticker immediately."],
+  ];
+
+  return (
+    <details open className="border border-emerald-500/30 rounded-lg bg-zinc-950 overflow-hidden">
+      <summary className="cursor-pointer list-none px-4 py-3 hover:bg-zinc-900/50">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h3 className="font-display text-base font-bold text-zinc-100">Intrinsic Value Calculation</h3>
+          <span className="font-mono text-[11px] text-emerald-300">Feeds % of Intrinsic Value and Allocation Signals</span>
+        </div>
+        <p className="mt-1 text-xs text-zinc-400">Intrinsic Value = Valuation TTM EPS × (P/E no-growth + Growth Multiplier × IV Growth Assumption %) × (Average AAA Yield ÷ Bond Yield).</p>
+      </summary>
+      <div className="border-t border-emerald-500/20 overflow-x-auto">
+        <table className="w-full min-w-[850px] text-left text-xs">
+          <thead className="bg-zinc-900/50 text-[10px] uppercase tracking-wider text-zinc-500">
+            <tr className="hairline">
+              <th className="px-4 py-2 font-medium">Factor</th>
+              <th className="px-3 py-2 font-medium">Calculation role</th>
+              <th className="px-4 py-2 font-medium">Default / ownership / behavior</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="hairline align-top">
+              <td className="px-4 py-3 font-medium text-zinc-200">Valuation TTM EPS</td>
+              <td className="px-3 py-3 leading-relaxed text-zinc-300">The earnings-per-share multiplier at the start of the formula.</td>
+              <td className="px-4 py-3 leading-relaxed text-zinc-400">Automatic mode selects the lower positive GAAP or Adjusted TTM EPS. Clicking a source copies it into this field; direct editing makes it Operator-owned and pins it. A pin prevents only valuation EPS refreshes.</td>
+            </tr>
+            <tr className="hairline align-top">
+              <td className="px-4 py-3 font-medium text-zinc-200">IV Growth Assumption %</td>
+              <td className="px-3 py-3 leading-relaxed text-zinc-300">Per-ticker forward-looking growth input multiplied by the global Growth Multiplier.</td>
+              <td className="px-4 py-3 leading-relaxed text-zinc-400">Operator-owned. Ticker Import starts it at 0% for review. It is distinct from provider TTM EPS Growth YoY and does not affect the Growth category score.</td>
+            </tr>
+            <tr className="hairline align-top">
+              <td className="px-4 py-3 font-medium text-zinc-200">Current Price</td>
+              <td className="px-3 py-3 leading-relaxed text-zinc-300">% of Intrinsic Value = Current Price ÷ Intrinsic Value × 100.</td>
+              <td className="px-4 py-3 leading-relaxed text-zinc-400">Provider price is the live default; an operator can edit it. It affects % of Intrinsic Value, the Valuation category, and allocation gates—not the intrinsic-value numerator.</td>
+            </tr>
+            {settings.map(([label, defaultValue, behavior]) => (
+              <tr key={label} className="hairline align-top">
+                <td className="px-4 py-3 font-medium text-zinc-200">{label}</td>
+                <td className="px-3 py-3 leading-relaxed text-zinc-300">Global formula setting; current default is <span className="font-mono text-emerald-300">{defaultValue}</span>.</td>
+                <td className="px-4 py-3 leading-relaxed text-zinc-400">{behavior}</td>
+              </tr>
+            ))}
+            <tr className="hairline align-top">
+              <td className="px-4 py-3 font-medium text-zinc-200">Unavailable result</td>
+              <td className="px-3 py-3 leading-relaxed text-zinc-300">No positive valuation EPS, or a non-positive formula result, produces no intrinsic value.</td>
+              <td className="px-4 py-3 leading-relaxed text-zinc-400">% of Intrinsic Value remains unavailable; Valuation uses its neutral factor default and Allocation Signals abstain rather than classifying the ticker as cheap.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
+}
+
 export default function DocsPanel() {
   const defaultGrowthFunding = RUBRIC_DEF.growthScore.qualitativeFields
     .find((field) => field.key === "growthFundingQuality")
@@ -91,8 +153,9 @@ export default function DocsPanel() {
       <div className="border-t border-zinc-800 p-4 space-y-3">
         <div>
           <h2 className="font-display text-lg font-bold">Scorecard calculations and weights</h2>
-          <p className="mt-1 text-xs leading-relaxed text-zinc-500">Each row below is a live score component. The factor score is normalized first, multiplied by its category weight, then scaled to the category maximum shown.</p>
+          <p className="mt-1 text-xs leading-relaxed text-zinc-500">Intrinsic value comes first because it produces % of Intrinsic Value, the largest Valuation factor. The category tables then show every live score component. Each factor score is normalized first, multiplied by its category weight, then scaled to the category maximum shown.</p>
         </div>
+        <IntrinsicValueMethodology />
         {CATEGORY_KEYS.map((category) => <Methodology key={category} category={category} />)}
       </div>
 

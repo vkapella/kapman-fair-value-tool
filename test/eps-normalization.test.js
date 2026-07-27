@@ -55,7 +55,7 @@ test("normal Finnhub refresh spends exactly metric and earnings calls per ticker
       ok: true,
       status: 200,
       json: async () => parsed.pathname === "/api/v1/stock/metric"
-        ? { metric: { peTTM: 10 } }
+        ? { metric: { peTTM: 10, epsGrowth3Y: 12, epsGrowth5Y: 15, payoutRatioTTM: 20, roiTTM: 18, marketCapitalization: 2500, shareOutstanding: 125 } }
         : [
             { period: "2025-12-31", actual: 1 },
             { period: "2025-09-30", actual: 1 },
@@ -68,6 +68,12 @@ test("normal Finnhub refresh spends exactly metric and earnings calls per ticker
   try {
     const result = await fetchTickerFundamentals("TEST");
     assert.equal(result.adjustedTtmEps, 4);
+    assert.equal(result.fundamentals.epsGrowth3Y, 0.12);
+    assert.equal(result.fundamentals.epsGrowth5Y, 0.15);
+    assert.equal(result.fundamentals.payoutRatioTtm, 0.2);
+    assert.equal(result.fundamentals.returnOnInvestment, 0.18);
+    assert.equal(result.fundamentals.marketCap, 2_500_000_000);
+    assert.equal(result.fundamentals.sharesOutstanding, 125_000_000);
     assert.deepEqual(paths.sort(), ["/api/v1/stock/earnings", "/api/v1/stock/metric"]);
   } finally {
     globalThis.fetch = originalFetch;

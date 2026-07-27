@@ -33,6 +33,11 @@ function fraction(value) {
   return n == null ? null : n / 100;
 }
 
+function millionsToUnits(value) {
+  const n = num(value);
+  return n == null ? null : n * 1_000_000;
+}
+
 function reportedQuarterKey(earning) {
   // Finnhub currently supplies both period and date. A report can be revised
   // or duplicated, so a fiscal-period identity is mandatory before it counts.
@@ -107,11 +112,17 @@ export async function fetchTickerFundamentals(ticker) {
       trailingPE: num(metric.peTTM), forwardPE: num(metric.forwardPE), priceToBook: num(metric.pb),
       debtToEquity: num(metric["totalDebt/totalEquityQuarterly"]), currentRatio: num(metric.currentRatioQuarterly),
       revenueGrowth: fraction(metric.revenueGrowthTTMYoy), returnOnEquity: fraction(metric.roeTTM),
+      epsGrowth3Y: fraction(metric.epsGrowth3Y), epsGrowth5Y: fraction(metric.epsGrowth5Y),
+      payoutRatioTtm: fraction(metric.payoutRatioTTM), returnOnInvestment: fraction(metric.roiTTM),
       returnOnAssets: fraction(metric.roaTTM), grossMargins: fraction(metric.grossMarginTTM),
       operatingMargins: fraction(metric.operatingMarginTTM), profitMargins: fraction(metric.netProfitMarginTTM),
       revenuePerShare: num(metric.revenuePerShareTTM), beta: num(metric.beta),
       fiftyTwoWeekHigh: num(metric["52WeekHigh"]), fiftyTwoWeekLow: num(metric["52WeekLow"]),
       dividendYield: fraction(metric.dividendYieldIndicatedAnnual),
+      // Finnhub publishes both fields in millions; the app's classification
+      // thresholds and Yahoo fallback use absolute dollars/shares.
+      marketCap: millionsToUnits(metric.marketCapitalization),
+      sharesOutstanding: millionsToUnits(metric.shareOutstanding),
     },
   };
 }

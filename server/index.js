@@ -5,6 +5,7 @@ import path from "path";
 import YahooFinance from "yahoo-finance2";
 import { fileURLToPath } from "url";
 import { DEFAULT_GLOBALS, SEED_STOCKS } from "../src/lib/defaultData.js";
+import { suggestIvGrowth } from "../src/lib/growthRecommendation.js";
 import { calcIV, calcPctIV, calcScore, allocationSignals } from "../src/lib/valuation.js";
 import { CATEGORY_KEYS, DEFAULT_JUDGMENT_OVERRIDES, FACTOR_INDEX } from "../src/lib/rubric.js";
 import { fetchFundamentalsBatch, finnhubConfigured } from "./lib/finnhub.js";
@@ -421,6 +422,7 @@ function normalizeGlobalsPayload(payload) {
 
 function stockFromRow(row) {
   const valuationEps = valuationEpsForRow(row);
+  const cachedQuote = getFundamentalsCache(row.ticker);
   return {
     ticker: row.ticker,
     // ttmEPS remains as a legacy alias, while all new callers should use the
@@ -436,6 +438,7 @@ function stockFromRow(row) {
       valuation: { value: valuationEps.value, basis: valuationEps.basis, pinned: Boolean(row.eps_pinned), unavailableReason: valuationEps.reason },
     },
     growth: row.growth,
+    growthRecommendation: cachedQuote?.growthRecommendation ?? null,
     currentPrice: row.current_price,
     updated: row.updated,
     valuation: row.valuation,
@@ -697,6 +700,10 @@ function emptyFundamentals() {
     debtToEquity: null,
     currentRatio: null,
     revenueGrowth: null,
+    epsGrowth3Y: null,
+    epsGrowth5Y: null,
+    payoutRatioTtm: null,
+    returnOnInvestment: null,
     freeCashflow: null,
     totalCash: null,
     totalDebt: null,
@@ -903,7 +910,7 @@ app.post("/api/prices", async (req, res) => {
 // source; Yahoo back-fills only the fields Finnhub's free tier lacks
 // (ownership, short interest, cash/debt/FCF levels, forward EPS). Shared by
 // POST /api/quotes and POST /api/snapshot.
-async function buildQuoteMap(normalized, { includeProfiles = false } = {}) {
+async function buildQuoteMap(normalized) {
   const finnhubByTicker = finnhubConfigured() ? await fetchFundamentalsBatch(normalized) : {};
 
   const result = {};
@@ -912,8 +919,10 @@ async function buildQuoteMap(normalized, { includeProfiles = false } = {}) {
       const yahooSymbol = yahooSymbolFromTicker(t);
       try {
           const cachedQuote = getFundamentalsCache(t);
-          const summaryModules = ["defaultKeyStatistics", "financialData", "price", "summaryDetail", "majorHoldersBreakdown"];
-          if (includeProfiles) summaryModules.push("assetProfile");
+          // Modules share one Yahoo quote-summary request. Always including
+          // the profile makes recommendation caps deterministic on a first
+          // refresh instead of depending on a previously warmed cache.
+          const summaryModules = ["defaultKeyStatistics", "financialData", "price", "summaryDetail", "majorHoldersBreakdown", "earningsTrend", "assetProfile"];
           const [quote, summary] = await Promise.all([
             yahooFinance.quote(yahooSymbol, {}, { validateResult: false }).catch(() => null),
             yahooFinance.quoteSummary(
@@ -935,10 +944,62 @@ async function buildQuoteMap(normalized, { includeProfiles = false } = {}) {
             ? yahooCurrentPrice / fh.trailingPE
             : null;
           const yahooTrailingEps = quote?.trailingEps ?? summary?.defaultKeyStatistics?.trailingEps ?? null;
+          const nextYearTrend = summary?.earningsTrend?.trend?.find((item) => item?.period === "+1y");
+          const forwardEpsGrowth = typeof nextYearTrend?.earningsEstimate?.growth === "number"
+            ? nextYearTrend.earningsEstimate.growth
+            : typeof nextYearTrend?.growth === "number" ? nextYearTrend.growth : null;
+          const analystCount = typeof nextYearTrend?.earningsEstimate?.numberOfAnalysts === "number"
+            ? nextYearTrend.earningsEstimate.numberOfAnalysts
+            : null;
           const gaapTtmEps = finnhubDerivedGaap ?? yahooTrailingEps;
           const gaapSource = finnhubDerivedGaap != null
             ? "finnhub.metric.peTTM+yahoo.price"
             : yahooTrailingEps != null ? "yahoo.trailingEps" : null;
+          const fundamentals = {
+            ...emptyFundamentals(),
+            trailingPE: fh?.fundamentals.trailingPE ?? summary?.summaryDetail?.trailingPE ?? null,
+            forwardPE: fh?.fundamentals.forwardPE ?? summary?.summaryDetail?.forwardPE ?? null,
+            priceToBook: fh?.fundamentals.priceToBook ?? summary?.defaultKeyStatistics?.priceToBook ?? null,
+            debtToEquity: fh?.fundamentals.debtToEquity ?? yahooDebtToEquity,
+            currentRatio: fh?.fundamentals.currentRatio ?? summary?.financialData?.currentRatio ?? null,
+            revenueGrowth: fh?.fundamentals.revenueGrowth ?? summary?.financialData?.revenueGrowth ?? null,
+            epsGrowth3Y: fh?.fundamentals.epsGrowth3Y ?? null,
+            epsGrowth5Y: fh?.fundamentals.epsGrowth5Y ?? null,
+            payoutRatioTtm: fh?.fundamentals.payoutRatioTtm ?? summary?.summaryDetail?.payoutRatio ?? null,
+            returnOnInvestment: fh?.fundamentals.returnOnInvestment ?? null,
+            freeCashflow: summary?.financialData?.freeCashflow ?? null,
+            totalCash: summary?.financialData?.totalCash ?? null,
+            totalDebt: summary?.financialData?.totalDebt ?? null,
+            returnOnEquity: fh?.fundamentals.returnOnEquity ?? summary?.financialData?.returnOnEquity ?? null,
+            returnOnAssets: fh?.fundamentals.returnOnAssets ?? summary?.financialData?.returnOnAssets ?? null,
+            grossMargins: fh?.fundamentals.grossMargins ?? summary?.financialData?.grossMargins ?? null,
+            operatingMargins: fh?.fundamentals.operatingMargins ?? summary?.financialData?.operatingMargins ?? null,
+            profitMargins: fh?.fundamentals.profitMargins ?? summary?.financialData?.profitMargins ?? null,
+            revenuePerShare: fh?.fundamentals.revenuePerShare ?? summary?.financialData?.revenuePerShare ?? null,
+            beta: fh?.fundamentals.beta ?? summary?.summaryDetail?.beta ?? null,
+            sector: summary?.assetProfile?.sector ?? cachedQuote?.fundamentals?.sector ?? null,
+            industry: summary?.assetProfile?.industry ?? cachedQuote?.fundamentals?.industry ?? null,
+            marketCap: fh?.fundamentals.marketCap ?? quote?.marketCap ?? summary?.summaryDetail?.marketCap ?? null,
+            fiftyTwoWeekHigh: fh?.fundamentals.fiftyTwoWeekHigh ?? summary?.summaryDetail?.fiftyTwoWeekHigh ?? null,
+            fiftyTwoWeekLow: fh?.fundamentals.fiftyTwoWeekLow ?? summary?.summaryDetail?.fiftyTwoWeekLow ?? null,
+            dividendYield: fh?.fundamentals.dividendYield ?? summary?.summaryDetail?.dividendYield ?? null,
+            shortPercentOfFloat: summary?.defaultKeyStatistics?.shortPercentOfFloat ?? null,
+            sharesOutstanding: fh?.fundamentals.sharesOutstanding ?? summary?.defaultKeyStatistics?.sharesOutstanding ?? null,
+            insidersPercentHeld: summary?.majorHoldersBreakdown?.insidersPercentHeld ?? null,
+            institutionsPercentHeld: summary?.majorHoldersBreakdown?.institutionsPercentHeld ?? null,
+          };
+          const growthRecommendation = suggestIvGrowth({
+            quoteType: quote?.quoteType ?? summary?.price?.quoteType,
+            sector: fundamentals.sector,
+            industry: fundamentals.industry,
+            marketCap: fundamentals.marketCap,
+            forwardEpsGrowth,
+            analystCount,
+            epsGrowth3Y: fundamentals.epsGrowth3Y,
+            epsGrowth5Y: fundamentals.epsGrowth5Y,
+            returnOnEquity: fundamentals.returnOnEquity,
+            payoutRatioTtm: fundamentals.payoutRatioTtm,
+          });
           result[t] = {
             // Yahoo is the only price source. Finnhub's normal refresh is
             // deliberately limited to /stock/metric and /stock/earnings.
@@ -953,39 +1014,13 @@ async function buildQuoteMap(normalized, { includeProfiles = false } = {}) {
             // below never consumes Yahoo's trailing EPS.
             trailingEps: gaapTtmEps,
             forwardEps: summary?.defaultKeyStatistics?.forwardEps ?? quote?.forwardEps ?? null,
+            forwardEpsGrowth,
             epsGrowthRate: fh?.epsGrowthRate ?? summary?.financialData?.earningsGrowth ?? quote?.earningsGrowth ?? null,
             longName: quote?.longName ?? summary?.price?.longName ?? summary?.price?.shortName ?? null,
             quoteType: quote?.quoteType ?? summary?.price?.quoteType ?? null,
-            source: { finnhub: Boolean(fh), yahoo: Boolean(quote || summary), price: "yahoo", gaapTtmEps: gaapSource, adjustedTtmEps: fh?.adjustedTtmEps != null ? "finnhub.earnings" : null },
-            fundamentals: {
-              ...emptyFundamentals(),
-              trailingPE: fh?.fundamentals.trailingPE ?? summary?.summaryDetail?.trailingPE ?? null,
-              forwardPE: fh?.fundamentals.forwardPE ?? summary?.summaryDetail?.forwardPE ?? null,
-              priceToBook: fh?.fundamentals.priceToBook ?? summary?.defaultKeyStatistics?.priceToBook ?? null,
-              debtToEquity: fh?.fundamentals.debtToEquity ?? yahooDebtToEquity,
-              currentRatio: fh?.fundamentals.currentRatio ?? summary?.financialData?.currentRatio ?? null,
-              revenueGrowth: fh?.fundamentals.revenueGrowth ?? summary?.financialData?.revenueGrowth ?? null,
-              freeCashflow: summary?.financialData?.freeCashflow ?? null,
-              totalCash: summary?.financialData?.totalCash ?? null,
-              totalDebt: summary?.financialData?.totalDebt ?? null,
-              returnOnEquity: fh?.fundamentals.returnOnEquity ?? summary?.financialData?.returnOnEquity ?? null,
-              returnOnAssets: fh?.fundamentals.returnOnAssets ?? summary?.financialData?.returnOnAssets ?? null,
-              grossMargins: fh?.fundamentals.grossMargins ?? summary?.financialData?.grossMargins ?? null,
-              operatingMargins: fh?.fundamentals.operatingMargins ?? summary?.financialData?.operatingMargins ?? null,
-              profitMargins: fh?.fundamentals.profitMargins ?? summary?.financialData?.profitMargins ?? null,
-              revenuePerShare: fh?.fundamentals.revenuePerShare ?? summary?.financialData?.revenuePerShare ?? null,
-              beta: fh?.fundamentals.beta ?? summary?.summaryDetail?.beta ?? null,
-              sector: summary?.assetProfile?.sector ?? cachedQuote?.fundamentals?.sector ?? null,
-              industry: summary?.assetProfile?.industry ?? cachedQuote?.fundamentals?.industry ?? null,
-              marketCap: fh?.fundamentals.marketCap ?? summary?.summaryDetail?.marketCap ?? null,
-              fiftyTwoWeekHigh: fh?.fundamentals.fiftyTwoWeekHigh ?? summary?.summaryDetail?.fiftyTwoWeekHigh ?? null,
-              fiftyTwoWeekLow: fh?.fundamentals.fiftyTwoWeekLow ?? summary?.summaryDetail?.fiftyTwoWeekLow ?? null,
-              dividendYield: fh?.fundamentals.dividendYield ?? summary?.summaryDetail?.dividendYield ?? null,
-              shortPercentOfFloat: summary?.defaultKeyStatistics?.shortPercentOfFloat ?? null,
-              sharesOutstanding: fh?.fundamentals.sharesOutstanding ?? summary?.defaultKeyStatistics?.sharesOutstanding ?? null,
-              insidersPercentHeld: summary?.majorHoldersBreakdown?.insidersPercentHeld ?? null,
-              institutionsPercentHeld: summary?.majorHoldersBreakdown?.institutionsPercentHeld ?? null,
-            },
+            source: { finnhub: Boolean(fh), yahoo: Boolean(quote || summary), price: "yahoo", gaapTtmEps: gaapSource, adjustedTtmEps: fh?.adjustedTtmEps != null ? "finnhub.earnings" : null, growthRecommendation: "finnhub.metric+yahoo.earningsTrend" },
+            growthRecommendation,
+            fundamentals,
           };
         } catch (_) {
           result[t] = null;
@@ -1207,7 +1242,7 @@ function normalizeTickerList(payload, field = "tickers") {
 app.post("/api/import/tickers", handleRoute(async (req, res) => {
   if (!isPlainObject(req.body)) throw apiError(400, "request body must be a JSON object");
   const tickers = normalizeTickerList(req.body.tickers);
-  const quotes = await buildQuoteMap(tickers, { includeProfiles: true });
+  const quotes = await buildQuoteMap(tickers);
   res.json(buildTickerPreview({
     tickers,
     stocks: getStocks(),
@@ -1219,7 +1254,7 @@ app.post("/api/import/tickers", handleRoute(async (req, res) => {
 app.post("/api/import/apply", handleRoute(async (req, res) => {
   if (!isPlainObject(req.body)) throw apiError(400, "request body must be a JSON object");
   const tickers = normalizeTickerList(req.body.addTickers, "addTickers");
-  const quotes = await buildQuoteMap(tickers, { includeProfiles: true });
+  const quotes = await buildQuoteMap(tickers);
   const preview = buildTickerPreview({
     tickers,
     stocks: getStocks(),

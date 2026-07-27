@@ -98,7 +98,17 @@ function IntrinsicValueMethodology() {
             <tr className="hairline align-top">
               <td className="px-4 py-3 font-medium text-zinc-200">IV Growth Assumption %</td>
               <td className="px-3 py-3 leading-relaxed text-zinc-300">Per-ticker forward-looking growth input multiplied by the global Growth Multiplier.</td>
-              <td className="px-4 py-3 leading-relaxed text-zinc-400">Operator-owned. Ticker Import starts it at 0% for review. It is distinct from provider TTM EPS Growth YoY and does not affect the Growth category score.</td>
+              <td className="px-4 py-3 leading-relaxed text-zinc-400">Operator-owned. Ticker Import starts it at 0% for review. Clicking Suggested IV Growth explicitly copies the recommendation here; provider refresh never overwrites it. Adoption recalculates IV, % of IV, the Valuation score, total score, and allocation gates. It is distinct from provider TTM EPS Growth YoY and does not affect the Growth category score.</td>
+            </tr>
+            <tr className="hairline align-top">
+              <td className="px-4 py-3 font-medium text-zinc-200">Suggested IV Growth %</td>
+              <td className="px-3 py-3 leading-relaxed text-zinc-300">Advisory value = supported provider-growth evidence after a Graham haircut and classification ceiling. Positive evidence receives a 20% haircut; missing-forward or highly dispersed evidence receives a 35% haircut.</td>
+              <td className="px-4 py-3 leading-relaxed text-zinc-400">Evidence is 50% Yahoo FY+1 consensus EPS growth, 25% Finnhub 3-year EPS growth, and 25% Finnhub 5-year EPS growth; available weights are re-normalized when a series is missing. It cannot exceed a valid ROE × (1 − payout ratio) capacity. Inputs are constrained to −20%…40%; values are rounded to 0.5 points.</td>
+            </tr>
+            <tr className="hairline align-top">
+              <td className="px-4 py-3 font-medium text-zinc-200">Recommendation caps and confidence</td>
+              <td className="px-3 py-3 leading-relaxed text-zinc-300">Caps: ETF/index 8%; financial 8%; cyclical or evidence spread above 15 points 10%; mature/mega-cap 15%; verified high growth 20%; other operating company 12%.</td>
+              <td className="px-4 py-3 leading-relaxed text-zinc-400">ETF rows receive a 7% low-confidence default because company metrics are not comparable. Company rows abstain without at least two growth observations, or one observation plus a valid capacity check. Confidence falls when evidence is sparse or disagrees.</td>
             </tr>
             <tr className="hairline align-top">
               <td className="px-4 py-3 font-medium text-zinc-200">Current Price</td>
@@ -144,6 +154,7 @@ export default function DocsPanel() {
         <Doc title="Intrinsic value formula">Intrinsic Value = Valuation TTM EPS × (P/E no-growth + Growth Multiplier × IV Growth Assumption %) × (Average AAA Yield ÷ Bond Yield). Defaults in Settings are 7, 1, 4.4%, and 4.4%. If valuation EPS is not positive, or the formula result is not positive, IV and % of IV are unavailable rather than treated as cheap.</Doc>
         <Doc title="EPS selection and pin">GAAP TTM EPS is provider-derived; Adjusted TTM EPS is the sum of four valid Finnhub earnings actuals. When both sources are available, automatic valuation EPS selects the lower positive value. Click either source to copy it into Valuation TTM EPS. Editing Valuation TTM EPS sets the Operator basis and pins it; the EPS pin prevents only that formula input from refreshing.</Doc>
         <Doc title="IV growth is not provider growth">IV Growth Assumption is an operator forward-looking input used only in intrinsic value. TTM EPS Growth YoY is a backward-looking provider metric used only in Growth scoring. Ticker Import starts IV Growth Assumption at 0% for review; neither value substitutes for the other.</Doc>
+        <Doc title="Suggested IV growth">The suggestion blends Yahoo FY+1 consensus EPS growth with Finnhub 3-year and 5-year history, limits it by a valid ROE × retained-earnings capacity check, applies a 20–35% Graham haircut, then applies an 8–20% classification cap. It is advisory: click it to adopt it. A provider refresh updates the suggestion but never the operator assumption.</Doc>
         <Doc title="Provider values and manual overrides">Provider values are the live defaults for quantitative factors. A manual factor entry replaces only that factor and is marked in the grid; clearing it restores the provider value on the next calculation. A failed provider refresh never blocks manual edits.</Doc>
         <Doc title="Category score pin">Unpinned categories use the live model score and refresh when factors change. Editing a Category Score pins an operator-curated value. Unpinning restores the model result while retaining the curated value for a future re-pin. A category pin does not freeze its underlying provider factors.</Doc>
         <Doc title="Judgment defaults">An unassessed judgment is neutral (55%) unless the platform seeds a conservative default. Earnings Quality starts as “{defaultGrowthFunding}”; Moat Trajectory starts as “{defaultMoatDurability}”. Both are operator-adjustable and should be reviewed rather than mistaken for provider facts.</Doc>

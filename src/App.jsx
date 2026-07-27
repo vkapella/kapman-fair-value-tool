@@ -92,10 +92,12 @@ export default function App() {
     const valuationTtmEps = s.valuationTtmEps ?? s.eps?.valuation?.value ?? s.ttmEPS ?? null;
     const valuationEpsBasis = s.valuationEpsBasis || s.eps?.valuation?.basis || "operator";
     const iv = calcIV(valuationTtmEps, s.growth, globals);
+    const suggestedGrowth = s.growthRecommendation?.value ?? null;
+    const suggestedIv = suggestedGrowth == null ? null : calcIV(valuationTtmEps, suggestedGrowth, globals);
     const pctIV = calcPctIV(s.currentPrice, iv);
     const score = calcScore(s);
     const sig = allocationSignals(s, iv, pctIV, score);
-    return { ...s, gaapTtmEps, adjustedTtmEps, valuationTtmEps, valuationEpsBasis, iv, pctIV, score, ...sig };
+    return { ...s, gaapTtmEps, adjustedTtmEps, valuationTtmEps, valuationEpsBasis, suggestedGrowth, suggestedIv, iv, pctIV, score, ...sig };
   }), [stocks, globals]);
 
   const sorted = useMemo(() => {

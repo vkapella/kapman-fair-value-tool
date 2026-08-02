@@ -53,8 +53,20 @@ by you, not reported to the human for confirmation:
 
 Only after all checklist items are confirmed should you report completion to the human.
 
-Do not push directly to `main` unless the user explicitly requests
-direct-to-main delivery.
+## Deployment to Fly
+
+- A push to `main` (or a manual run of the **Fly Deploy** workflow) auto-deploys
+  via `.github/workflows/fly-deploy.yml` (`flyctl deploy --remote-only`). A push
+  to `main` is therefore a production release — the validation suite above is
+  the release gate.
+- **Token scope rule:** the `FLY_API_TOKEN` Actions secret must be a
+  *deploy-scoped, per-app* token —
+  `fly tokens create deploy -a kapman-fair-value-tool` — never an org-wide
+  token. This repo's CI credential must be incapable of touching the other
+  kapman Fly apps.
+- While the secret is unset the workflow skips green and deploys stay manual
+  (`fly deploy` from an operator machine). Remote agent sessions hold no Fly
+  credentials; their job ends at a validated push to `main`.
 
 ## Tech stack (current)
 - React 18 (frontend)
@@ -166,8 +178,7 @@ Work is not complete unless all of the following are true and confirmed by you:
 - App is reachable at `http://localhost:8080`
 - Core API route `/api/prices` responds correctly
 - No runtime errors introduced in UI flow
-- GitHub issue is open, linked to the PR, and closed on completion
-- PR auto-merge is enabled and confirmed via `gh pr view --json autoMergeRequest`
+- GitHub issue is open, referenced by the commit(s), and closed on completion
 - Local checkout is restored to `main` and clean
 
 ## Off-limits

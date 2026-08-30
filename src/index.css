@@ -34,6 +34,24 @@ html, body, #root {
   color: var(--text);
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+/* 100dvh with a vh fallback (UI-2): the app fills the visual viewport on
+   mobile browsers whose chrome collapses. */
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* ≥44px touch targets for nav controls on coarse pointers below lg: (UI-2). */
+@media (pointer: coarse) and (max-width: 1023px) {
+  .nav-touch {
+    min-height: 44px;
+  }
+}
+
 /* This repo's base type is 13px (UI-0): the app previously inherited
    Tailwind's 16px root. The vendored theme's 12.5px was measured against
    Tradelog, not here; the copy stays verbatim, so the override lives here. */

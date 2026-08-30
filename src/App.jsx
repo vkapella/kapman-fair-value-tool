@@ -2,7 +2,9 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { DEFAULT_GLOBALS, SEED_STOCKS } from "./lib/defaultData.js";
 import { calcIV, calcPctIV, calcScore, allocationSignals } from "./lib/valuation.js";
 import { apiRequest, todayShort, nextNewTicker } from "./lib/api.js";
+import { Plus } from "lucide-react";
 import Header from "./components/Header.jsx";
+import DestinationNav from "./components/DestinationNav.jsx";
 import SettingsPanel from "./components/SettingsPanel.jsx";
 import StatsBar from "./components/StatsBar.jsx";
 import TabBar from "./components/TabBar.jsx";
@@ -74,15 +76,30 @@ export default function App() {
   }, []);
 
   // A session should return to the last working view without making a stale
-  // browser preference permanent across devices or future sessions.
+  // browser preference permanent across devices or future sessions. Rekeyed
+  // to the UI-2 nav: destination and subtab restore independently.
   useEffect(() => {
-    const savedTab = window.sessionStorage.getItem("kapman-main-subtab");
-    if (savedTab) setTab(savedTab);
+    const savedDest = window.sessionStorage.getItem("kapman-fv-dest");
+    if (savedDest && ["main", "docs", "import"].includes(savedDest)) setTopTab(savedDest);
+    const savedTab = window.sessionStorage.getItem("kapman-fv-subtab")
+      || window.sessionStorage.getItem("kapman-main-subtab");
+    if (savedTab && ["scorecard", "intrinsic", "allocation", ...CATEGORY_KEYS].includes(savedTab)) setTab(savedTab);
   }, []);
 
+  const selectTopTab = (nextDest) => {
+    setTopTab(nextDest);
+    window.sessionStorage.setItem("kapman-fv-dest", nextDest);
+  };
+
+  // Subtab panels stay mounted (hidden, not unmounted), so each editor keeps
+  // its container scroll and in-progress cell drafts; the page scroll offset
+  // is saved and restored per subtab here.
+  const subtabScroll = useRef({});
   const selectMainTab = (nextTab) => {
+    subtabScroll.current[tab] = window.scrollY;
     setTab(nextTab);
-    window.sessionStorage.setItem("kapman-main-subtab", nextTab);
+    window.sessionStorage.setItem("kapman-fv-subtab", nextTab);
+    window.requestAnimationFrame(() => window.scrollTo(0, subtabScroll.current[nextTab] ?? 0));
   };
 
   const rows = useMemo(() => stocks.map((s) => {
@@ -304,58 +321,93 @@ export default function App() {
 
         {showSettings && <SettingsPanel globals={globals} setGlobals={setGlobals} />}
 
-        <StatsBar rowsCount={rows.length} stats={stats} />
+        <div className="flex items-stretch">
+          <DestinationNav topTab={topTab} setTopTab={selectTopTab} />
 
-        <TabBar topTab={topTab} setTopTab={setTopTab} tab={tab} setTab={selectMainTab} addStock={addStock} dataLoading={dataLoading} dataError={dataError} />
+          <div className={`flex-1 min-w-0 ${topTab === "main" ? "pb-[calc(var(--tabbar-total)_+_52px)]" : "pb-[var(--tabbar-total)]"} md:pb-0`}>
+            <StatsBar rowsCount={rows.length} stats={stats} />
 
-        <main className="max-w-[1500px] mx-auto px-6 py-6">
-          {topTab === "main" && dataLoading && <StatePanel title="Loading watchlist" message="Reading stocks and formula variables from the server database." />}
-          {topTab === "main" && !dataLoading && dataError && (
-            <StatePanel
-              title="Unable to load saved data"
-              message={`The server database could not be reached: ${dataError}`}
-              actionLabel="Retry"
-              onAction={loadData}
-            />
-          )}
-          {topTab === "docs" && <DocsPanel />}
-          {topTab === "import" && <ImportPanel onImported={loadData} />}
-          {!dataLoading && !dataError && topTab === "main" && (
-            <>
-              {tab === "scorecard" && <ScoreCardTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
-              {tab === "intrinsic" && (
-                <IntrinsicTable
-                  rows={sorted}
-                  updateStock={updateStock}
-                  removeStock={removeStock}
-                  stocks={stocks}
-                  sortBy={sortBy}
-                  sortDir={sortDir}
-                  sortToggle={sortToggle}
+            {topTab === "main" && <TabBar tab={tab} setTab={selectMainTab} addStock={addStock} dataLoading={dataLoading} dataError={dataError} />}
+
+            <main className="max-w-[1500px] mx-auto px-6 py-6">
+              {topTab === "main" && dataLoading && <StatePanel title="Loading watchlist" message="Reading stocks and formula variables from the server database." />}
+              {topTab === "main" && !dataLoading && dataError && (
+                <StatePanel
+                  title="Unable to load saved data"
+                  message={`The server database could not be reached: ${dataError}`}
+                  actionLabel="Retry"
+                  onAction={loadData}
                 />
               )}
-              {tab === "allocation" && <AllocationTable rows={sorted} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />}
-              {CATEGORY_KEYS.includes(tab) && (
-                <CategoryGrid
-                  category={tab}
-                  rows={sorted}
-                  stocks={stocks}
-                  factors={factors}
-                  computed={computed}
-                  updateStock={updateStock}
-                  updateFactor={updateFactor}
-                  sortBy={sortBy}
-                  sortDir={sortDir}
-                  sortToggle={sortToggle}
-                />
+              {topTab === "docs" && <DocsPanel />}
+              {topTab === "import" && <ImportPanel onImported={loadData} />}
+              {!dataLoading && !dataError && topTab === "main" && (
+                <>
+                  {/* Panels stay mounted so each subtab keeps its scroll
+                      position and in-progress edits when you leave and return. */}
+                  <div className={tab === "scorecard" ? "" : "hidden"}>
+                    <ScoreCardTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
+                  </div>
+                  <div className={tab === "intrinsic" ? "" : "hidden"}>
+                    <IntrinsicTable
+                      rows={sorted}
+                      updateStock={updateStock}
+                      removeStock={removeStock}
+                      stocks={stocks}
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      sortToggle={sortToggle}
+                    />
+                  </div>
+                  <div className={tab === "allocation" ? "" : "hidden"}>
+                    <AllocationTable rows={sorted} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
+                  </div>
+                  {CATEGORY_KEYS.map((category) => (
+                    <div key={category} className={tab === category ? "" : "hidden"}>
+                      <CategoryGrid
+                        category={category}
+                        rows={sorted}
+                        stocks={stocks}
+                        factors={factors}
+                        computed={computed}
+                        updateStock={updateStock}
+                        updateFactor={updateFactor}
+                        sortBy={sortBy}
+                        sortDir={sortDir}
+                        sortToggle={sortToggle}
+                      />
+                    </div>
+                  ))}
+                </>
               )}
-            </>
-          )}
-          <div className="mt-8 text-[10px] text-text-3 font-mono leading-relaxed">
-            <p>Scoring rubric (max 100): Valuation 20 · Growth 20 · Moat 20 · Execution Risk 10 · Economy 30. Score ≥75 = potential buy.</p>
-            <p className="mt-1">Allocation signals are algorithmic defaults. Override per your conviction. Not financial advice.</p>
+              <div className="mt-8 text-[10px] text-text-3 font-mono leading-relaxed">
+                <p>Scoring rubric (max 100): Valuation 20 · Growth 20 · Moat 20 · Execution Risk 10 · Economy 30. Score ≥75 = potential buy.</p>
+                <p className="mt-1">Allocation signals are algorithmic defaults. Override per your conviction. Not financial advice.</p>
+              </div>
+            </main>
           </div>
-        </main>
+        </div>
+
+        {/* <768: Add Ticker moves to a 52px sticky action bar above the tab
+            bar, visible only on the score-card destination (decision 20). */}
+        {topTab === "main" && (
+          <div
+            className="md:hidden fixed inset-x-0 z-30 h-[52px] border-t border-border bg-surface-2 flex items-center px-4"
+            style={{
+              bottom: "var(--tabbar-total)",
+              paddingLeft: "max(16px, env(safe-area-inset-left, 0px))",
+              paddingRight: "max(16px, env(safe-area-inset-right, 0px))",
+            }}
+          >
+            <button
+              onClick={addStock}
+              disabled={dataLoading || !!dataError}
+              className="w-full h-10 rounded bg-accent text-bg text-xs font-medium flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Ticker
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

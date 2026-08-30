@@ -14,10 +14,13 @@ export const ivBg = (pct) =>
   : pct < 100 ? "bg-pos-dim border-pos-border"
   : pct < 110 ? "bg-warn-dim border-warn-border"
   : "bg-neg-dim border-neg-border";
+// Score bands (UI-3): ≥80 pos, 75–79 accent, 65–74 warn, <65 text-3.
+// text-3 on surface-3 passes AA at 4.62:1 — do not darken either token
+// without re-measuring (Amendment 02 §2).
 export const scoreColor = (s) =>
   s >= 80 ? "bg-pos text-bg"
   : s >= 75 ? "bg-accent text-bg"
-  : s >= 65 ? "bg-warn text-bg" : "bg-surface-3 text-text-2";
+  : s >= 65 ? "bg-warn text-bg" : "bg-surface-3 text-text-3";
 
 export function formatFieldValue(value, format) {
   if (value == null || value === "") return "—";

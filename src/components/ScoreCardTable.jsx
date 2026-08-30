@@ -58,7 +58,7 @@ export default function ScoreCardTable({ rows, updateStock, removeStock, stocks,
                     <span className={`inline-flex items-center justify-center w-12 py-1 rounded font-mono font-bold text-xs ${scoreColor(r.score)}`}>{r.score}</span>
                   </td>
                   <td className="px-2 py-2 text-right">
-                    <button onClick={() => removeStock(idx)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 transition">
+                    <button onClick={() => removeStock(idx)} aria-label={`Remove ${r.ticker}`} className="opacity-40 hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 focus-visible:text-rose-400 rounded transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </td>

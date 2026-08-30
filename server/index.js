@@ -727,17 +727,21 @@ function emptyFundamentals() {
   };
 }
 
-// Version identity for the header chip (UI-1). The product version is baked
-// at build: APP_VERSION (or the package.json version) for the chip, GIT_SHA
-// via a Docker build arg, and the deployment id from Fly's runtime env —
-// null when not deployed on Fly, and the client omits that row entirely.
-const APP_VERSION = process.env.APP_VERSION
-  || JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")).version;
+// Release identity for the header chip (UI-1, decision 05: the chip carries
+// the product version). This app has no release-tag scheme and package.json's
+// version is a static placeholder that no release bumps, so the product
+// version here IS the build's short commit SHA — the only identifier that
+// actually distinguishes one release from the next. GIT_SHA is baked into the
+// image at build (see Dockerfile and the deploy workflow).
+//
+// Absent rather than wrong: with no SHA baked in — a local `node server` —
+// version is null and the client renders no chip at all (decision 06).
+const GIT_SHA = process.env.GIT_SHA || null;
 app.get("/api/version", (req, res) => {
   const imageTag = (process.env.FLY_IMAGE_REF || "").split(":")[1] || null;
   res.json({
-    version: APP_VERSION,
-    sha: process.env.GIT_SHA || null,
+    version: GIT_SHA ? GIT_SHA.slice(0, 7) : null,
+    sha: GIT_SHA,
     deploymentId: imageTag || process.env.FLY_MACHINE_ID || null,
   });
 });

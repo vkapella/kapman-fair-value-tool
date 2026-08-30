@@ -24,6 +24,11 @@
   --pos-border: color-mix(in srgb, var(--pos) 40%, transparent);
   --warn-border: color-mix(in srgb, var(--warn) 40%, transparent);
   --neg-border: color-mix(in srgb, var(--neg) 40%, transparent);
+
+  /* design-lint-allow: a 2%-white hairline texture, not a semantic colour —
+     the token scale has no entry for a decorative overlay and should not gain
+     one. Defined once here so the canvas grid has a single source. */
+  --grid-hairline: rgba(255, 255, 255, 0.02);
 }
 
 html, body, #root {
@@ -75,7 +80,7 @@ body {
 
 .grid-bg {
   background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    linear-gradient(to right, var(--grid-hairline) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-hairline) 1px, transparent 1px);
   background-size: 32px 32px;
 }

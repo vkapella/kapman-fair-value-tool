@@ -1,0 +1,35 @@
+# Validation gate. A push to main is a production release (see AGENTS.md), so
+# these run before the deploy workflow's own trigger fires — and on pull
+# requests, where a design-system regression is cheapest to fix.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+jobs:
+  validate:
+    name: Lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # The shared theme is only shared if it is actually used. This fails on
+      # stock palette classes, raw colour literals, token escapes, off-scale
+      # z-indexes, and app CSS that re-implements a theme primitive — the
+      # regression that shipped in a sibling app unnoticed.
+      - name: Design system
+        run: npm run lint:design
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

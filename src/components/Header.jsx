@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Settings, Camera, RefreshCw, Calculator, MoreHorizontal } from "lucide-react";
+import { Settings, Camera, RefreshCw, MoreHorizontal } from "lucide-react";
 import { apiRequest } from "../lib/api.js";
 
 const SAVE_STATES = {
@@ -36,21 +36,27 @@ function VersionChip() {
     };
   }, [open]);
 
+  // Absent rather than "unknown" when the endpoint cannot be reached
+  // (decision 06).
+  if (!info?.version) return null;
+
   return (
     <div ref={rootRef} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        aria-label="Version details"
-        className="km-version-chip cursor-pointer"
+        aria-label="Release details"
+        title={info.sha}
+        // Bounded and truncating: the version string is external input, and an
+        // unbounded chip paints over the header.
+        className="km-version-chip cursor-pointer max-w-[13ch] overflow-hidden text-ellipsis whitespace-nowrap"
       >
-        {info ? `v${info.version}` : "v—"}
+        {info.version}
       </button>
       {open && (
         <div className="absolute left-0 top-full mt-1.5 min-w-48 rounded border border-border bg-surface-2 px-3 py-2 text-[11px] font-mono shadow-lg z-30 whitespace-nowrap">
-          <div className="flex justify-between gap-4"><span className="text-text-3">Version</span><span className="text-text-2">{info ? info.version : "unavailable"}</span></div>
-          <div className="flex justify-between gap-4 mt-1"><span className="text-text-3">SHA</span><span className="text-text-2">{info?.sha ? info.sha.slice(0, 12) : "—"}</span></div>
-          {info?.deploymentId && (
+          <div className="flex justify-between gap-4"><span className="text-text-3">Commit</span><span className="text-text-2">{info.sha || info.version}</span></div>
+          {info.deploymentId && (
             <div className="flex justify-between gap-4 mt-1"><span className="text-text-3">Deployment</span><span className="text-text-2">{info.deploymentId}</span></div>
           )}
         </div>
@@ -93,8 +99,12 @@ export default function Header({
     <header className="border-b border-border bg-surface-2 backdrop-blur sticky top-0 z-20">
       <div className="max-w-[1500px] mx-auto px-6 py-4 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="relative w-7 h-7 rounded-md border border-border bg-surface-3 flex items-center justify-center flex-none">
-            <Calculator className="w-4 h-4 text-gold" />
+          <div className="relative w-7 h-7 flex-none">
+            {/* The commissioned mark shipped in the handoff bundle
+                (assets/kapman-mark.png), the same file the sibling apps
+                render. Decision 09's "type monogram is the shipping mark"
+                describes the fallback, not this. */}
+            <img src="/kapman-mark.png" alt="" aria-hidden="true" width={28} height={28} className="w-7 h-7 rounded-md" />
             {/* <1024px: save status collapses to a dot beside the mark; the
                 text moves to the ⋯ sheet once UI-2 builds it. */}
             {save && (

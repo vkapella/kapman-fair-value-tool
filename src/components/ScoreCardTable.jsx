@@ -45,7 +45,11 @@ function RowDetailSheet({ row, onClose, onOpenCategory }) {
 
   return (
     <div className="lg:hidden">
-      <div className="fixed inset-0 z-[70]" style={{ background: "rgba(8, 9, 12, 0.6)" }} onClick={onClose} />
+      <div
+        className="fixed inset-0 z-[70]"
+        style={{ background: "color-mix(in srgb, var(--bg) 60%, transparent)" }}
+        onClick={onClose}
+      />
       <div
         role="dialog"
         aria-label={`${row.ticker} category detail`}

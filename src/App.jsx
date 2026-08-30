@@ -33,10 +33,11 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const statusTimer = useRef(null);
 
+  // Save status is persistent, not a toast (UI-1): "✓ Saved" holds until the
+  // next state change rather than reverting to idle on a timer.
   const markSaved = () => {
     setStorageStatus("saved");
     if (statusTimer.current) clearTimeout(statusTimer.current);
-    statusTimer.current = setTimeout(() => setStorageStatus("idle"), 1500);
   };
 
   const showSaveError = (message) => {

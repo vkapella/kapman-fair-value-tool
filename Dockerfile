@@ -11,8 +11,12 @@ RUN npm run build
 
 # --- runtime stage ---
 FROM node:20-slim
+# Bake the commit into the image for /api/version:
+#   fly deploy --build-arg GIT_SHA=$(git rev-parse HEAD)
+ARG GIT_SHA
 WORKDIR /app
 ENV NODE_ENV=production
+ENV GIT_SHA=$GIT_SHA
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ \
   && rm -rf /var/lib/apt/lists/*

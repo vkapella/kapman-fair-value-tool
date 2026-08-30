@@ -727,6 +727,21 @@ function emptyFundamentals() {
   };
 }
 
+// Version identity for the header chip (UI-1). The product version is baked
+// at build: APP_VERSION (or the package.json version) for the chip, GIT_SHA
+// via a Docker build arg, and the deployment id from Fly's runtime env —
+// null when not deployed on Fly, and the client omits that row entirely.
+const APP_VERSION = process.env.APP_VERSION
+  || JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")).version;
+app.get("/api/version", (req, res) => {
+  const imageTag = (process.env.FLY_IMAGE_REF || "").split(":")[1] || null;
+  res.json({
+    version: APP_VERSION,
+    sha: process.env.GIT_SHA || null,
+    deploymentId: imageTag || process.env.FLY_MACHINE_ID || null,
+  });
+});
+
 app.get("/api/data", handleRoute((req, res) => {
   const stocks = getStocks();
   const factors = {};

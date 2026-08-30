@@ -4,25 +4,38 @@ import JudgmentCell from "./cells/JudgmentCell.jsx";
 import NumCell from "./cells/NumCell.jsx";
 import SortHeader from "./SortHeader.jsx";
 import EmptyTableRow from "./EmptyTableRow.jsx";
-import { RUBRIC_DEF, SCORE_WEIGHTS } from "../lib/rubric.js";
+import CategorySingleTicker from "./CategorySingleTicker.jsx";
+import { categoryFields, countUnassessed, fieldTitle, weightLabel, PIN_TITLE } from "../lib/categoryFields.js";
 import { formatFieldValue } from "../lib/format.js";
 
-// One grid per rubric category (Valuation / Growth / Moat / Execution Risk /
-// Economy). Columns are derived entirely from RUBRIC_DEF[category] so a
-// change to the rubric (new field, new judgment option) shows up here without
-// touching this file.
-export default function CategoryGrid({ category, rows, stocks, factors, computed, updateStock, updateFactor, sortBy, sortDir, sortToggle }) {
-  const def = RUBRIC_DEF[category];
-  const derivedFields = def.derivedFields || [];
-  const scoreFields = [...derivedFields, ...def.quantitativeFields, ...def.qualitativeFields];
-  const colSpan = 1 + derivedFields.length + def.quantitativeFields.length + def.qualitativeFields.length + 3;
-  const weightLabel = (field) => {
-    const scoreKey = field.scoreKey || field.key;
-    const percent = Math.round((SCORE_WEIGHTS[category][scoreKey] || 0) * 100);
-    const shared = scoreFields.filter((candidate) => (candidate.scoreKey || candidate.key) === scoreKey).length > 1;
-    return `${percent}%${shared ? " shared" : ""}`;
-  };
-  const fieldTitle = (field) => `${field.description} · Score weight: ${weightLabel(field)}`;
+// One editor per rubric category (Valuation / Growth / Moat / Execution Risk /
+// Economy), in two orientations (UI-4, decision 15):
+//
+//   ≥1024px  every tracked ticker down the rows, factors across — the
+//            orientation that lets an operator compare one factor across the
+//            whole watchlist, which is what this screen is for.
+//   <1024px  the single-ticker transpose in CategorySingleTicker, the only
+//            orientation that reaches every factor at 390px.
+//
+// Both derive their factor set from RUBRIC_DEF via lib/categoryFields, so a
+// rubric change shows up in both without touching either file.
+export default function CategoryGrid({
+  category,
+  rows,
+  stocks,
+  factors,
+  computed,
+  updateStock,
+  updateFactor,
+  sortBy,
+  sortDir,
+  sortToggle,
+  selectedTicker,
+  setSelectedTicker,
+}) {
+  const { def, derived, quantitative, qualitative, all } = categoryFields(category);
+  const colSpan = 1 + all.length + 3;
+  const categoryName = def.label.replace(/\s*\/\d+$/, "");
 
   const togglePin = (idx, current) => {
     const pinned = new Set(current.pinnedCategories || []);
@@ -33,30 +46,38 @@ export default function CategoryGrid({ category, rows, stocks, factors, computed
   return (
     <div className="rounded-lg border border-border overflow-hidden bg-surface">
       <div className="px-4 py-3 border-b border-border">
-        <h2 className="font-display text-lg font-bold">{def.label.replace(/\s*\/\d+$/, "")} Factors</h2>
+        <h2 className="font-display text-lg font-bold">{categoryName} Factors</h2>
         <p className="text-[11px] text-text-3 font-mono">
           Every displayed factor feeds this category score. Model outputs are read-only; fetched values are dimmed and manual overrides are bright with a ● marker.
           Judgment fields default to <span className="text-text-2"> — not assessed — </span> until you set them.
         </p>
       </div>
-      <div className="overflow-x-auto">
+
+      <CategorySingleTicker
+        category={category}
+        rows={rows}
+        stocks={stocks}
+        factors={factors}
+        computed={computed}
+        updateStock={updateStock}
+        updateFactor={updateFactor}
+        selectedTicker={selectedTicker}
+        setSelectedTicker={setSelectedTicker}
+      />
+
+      <div className="hidden lg:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-surface-2">
             <tr className="hairline">
               <SortHeader col="ticker" label="Ticker" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} align="left" />
-              {derivedFields.map((field) => (
-                <th key={field.key} title={fieldTitle(field)} className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-text-3">
-                  {field.label}<span className="block text-[9px] text-text-4">{weightLabel(field)}</span>
+              {[...derived, ...quantitative].map((field) => (
+                <th key={field.key} title={fieldTitle(category, field, all)} className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-text-3">
+                  {field.label}<span className="block text-[9px] text-text-4">{weightLabel(category, field, all)}</span>
                 </th>
               ))}
-              {def.quantitativeFields.map((field) => (
-                <th key={field.key} title={fieldTitle(field)} className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-text-3">
-                  {field.label}<span className="block text-[9px] text-text-4">{weightLabel(field)}</span>
-                </th>
-              ))}
-              {def.qualitativeFields.map((field) => (
-                <th key={field.key} title={fieldTitle(field)} className="px-2 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-text-3">
-                  {field.label}<span className="block text-[9px] text-text-4">{weightLabel(field)}</span>
+              {qualitative.map((field) => (
+                <th key={field.key} title={fieldTitle(category, field, all)} className="px-2 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-text-3">
+                  {field.label}<span className="block text-[9px] text-text-4">{weightLabel(category, field, all)}</span>
                 </th>
               ))}
               <SortHeader col={category} label="Category Score" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
@@ -71,17 +92,21 @@ export default function CategoryGrid({ category, rows, stocks, factors, computed
               const isPinned = (r.pinnedCategories || []).includes(category);
               const effective = r[category];
               const comp = computed[r.ticker]?.[category] ?? null;
-              const unassessed = def.qualitativeFields.filter((f) => tickerFactors[f.key]?.manual == null).length;
+              const unassessed = countUnassessed(qualitative, tickerFactors);
 
               return (
                 <tr key={r.ticker} className="hairline hover:bg-surface-2 group">
                   <td className="px-3 py-2 font-mono text-xs text-text">{r.ticker}</td>
-                  {derivedFields.map((field) => (
-                    <td key={field.key} title={field.description} className="px-2 py-2 text-right tabular-nums font-mono text-xs text-text">
-                      {formatFieldValue(r[field.key], field.format)}
+                  {derived.map((field) => (
+                    <td key={field.key} title={field.description} className="px-2 py-2 text-right">
+                      {/* Derived cells are model output and never editable; the
+                          dashed border says so without a disabled control. */}
+                      <span className="km-cell--derived inline-block px-2 py-1 rounded tabular-nums font-mono text-xs">
+                        {formatFieldValue(r[field.key], field.format)}
+                      </span>
                     </td>
                   ))}
-                  {def.quantitativeFields.map((field) => {
+                  {quantitative.map((field) => {
                     const entry = tickerFactors[field.key] || { manual: null, fetched: null };
                     return (
                       <td key={field.key} className="px-2 py-2 text-right">
@@ -94,7 +119,7 @@ export default function CategoryGrid({ category, rows, stocks, factors, computed
                       </td>
                     );
                   })}
-                  {def.qualitativeFields.map((field) => {
+                  {qualitative.map((field) => {
                     const entry = tickerFactors[field.key] || { manual: null };
                     return (
                       <td key={field.key} className="px-2 py-2">
@@ -134,9 +159,9 @@ export default function CategoryGrid({ category, rows, stocks, factors, computed
                     <div className="flex items-center justify-center">
                       <button
                         onClick={() => togglePin(idx, r)}
-                        title={isPinned
-                          ? "Pinned: your number is in force. Unpin to let the model's computed value take over — safe and reversible, re-pinning restores your number exactly."
-                          : "Unpinned: the model's computed value is live and updates automatically. Pin to lock in your own number instead."}
+                        aria-pressed={isPinned}
+                        aria-label={`Pin ${categoryName} score for ${r.ticker}`}
+                        title={isPinned ? PIN_TITLE.pinned : PIN_TITLE.unpinned}
                         className={`p-1 rounded transition ${isPinned ? "text-warn hover:opacity-80" : "text-text-4 hover:text-text"}`}
                       >
                         {isPinned ? <Pin className="w-3.5 h-3.5" /> : <PinOff className="w-3.5 h-3.5" />}

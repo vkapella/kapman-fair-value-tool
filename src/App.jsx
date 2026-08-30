@@ -33,6 +33,9 @@ export default function App() {
   const [snapshotting, setSnapshotting] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  // Which ticker the single-ticker category editor is showing below 1024px
+  // (UI-4). Tapping a category on a score-card row opens that editor here.
+  const [selectedTicker, setSelectedTicker] = useState(null);
   const statusTimer = useRef(null);
 
   // Save status is persistent, not a toast (UI-1): "✓ Saved" holds until the
@@ -346,7 +349,19 @@ export default function App() {
                   {/* Panels stay mounted so each subtab keeps its scroll
                       position and in-progress edits when you leave and return. */}
                   <div className={tab === "scorecard" ? "" : "hidden"}>
-                    <ScoreCardTable rows={sorted} updateStock={updateStock} removeStock={removeStock} stocks={stocks} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
+                    <ScoreCardTable
+                      rows={sorted}
+                      updateStock={updateStock}
+                      removeStock={removeStock}
+                      stocks={stocks}
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      sortToggle={sortToggle}
+                      onOpenCategory={(ticker, category) => {
+                        setSelectedTicker(ticker);
+                        selectMainTab(category);
+                      }}
+                    />
                   </div>
                   <div className={tab === "intrinsic" ? "" : "hidden"}>
                     <IntrinsicTable
@@ -375,6 +390,8 @@ export default function App() {
                         sortBy={sortBy}
                         sortDir={sortDir}
                         sortToggle={sortToggle}
+                        selectedTicker={selectedTicker}
+                        setSelectedTicker={setSelectedTicker}
                       />
                     </div>
                   ))}

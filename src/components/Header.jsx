@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Settings, Camera, RefreshCw, Calculator } from "lucide-react";
+import { Settings, Camera, RefreshCw, Calculator, MoreHorizontal } from "lucide-react";
 import { apiRequest } from "../lib/api.js";
 
 const SAVE_STATES = {
@@ -72,6 +72,23 @@ export default function Header({
   refreshMsg,
 }) {
   const save = SAVE_STATES[storageStatus] || null;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setMenuOpen(false);
+    };
+    const onKey = (event) => { if (event.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
   return (
     <header className="border-b border-border bg-surface-2 backdrop-blur sticky top-0 z-20">
       <div className="max-w-[1500px] mx-auto px-6 py-4 flex items-center justify-between gap-4">
@@ -99,21 +116,60 @@ export default function Header({
           {save && (
             <span className={`km-save hidden lg:inline-flex ${save.pill}`}>{save.label}</span>
           )}
+          {/* Settings and Snapshot fold into the ⋯ sheet below lg:, where the
+              full action row does not fit (UI-1). Refresh Prices is the
+              primary action and stays out. */}
           <button onClick={() => setShowSettings((v) => !v)}
-            className="px-3 py-2 rounded border border-border bg-surface-3 hover:border-border-strong text-xs flex items-center gap-2 transition">
+            className="hidden lg:flex px-3 py-2 rounded border border-border bg-surface-3 hover:border-border-strong text-xs items-center gap-2 transition">
             <Settings className="w-3.5 h-3.5" /> Settings
           </button>
           <button onClick={takeSnapshot} disabled={snapshotting || refreshing || dataLoading || !!dataError}
             title="Freeze today's model state (prices, EPS, scores, IV, signals, fundamentals) to the snapshot log and copy the JSON for the knowledge base"
-            className="px-3 py-2 rounded border border-accent-border text-accent hover:bg-accent-dim text-xs flex items-center gap-2 transition disabled:opacity-60 font-medium">
+            className="hidden lg:flex px-3 py-2 rounded border border-accent-border text-accent hover:bg-accent-dim text-xs items-center gap-2 transition disabled:opacity-60 font-medium">
             <Camera className={`w-3.5 h-3.5 ${snapshotting ? "animate-pulse" : ""}`} />
             {snapshotting ? "Snapshotting…" : "Snapshot + Copy JSON"}
           </button>
           <button onClick={refreshPrices} disabled={refreshing || dataLoading || !!dataError}
+            aria-label="Refresh Prices"
             className="px-3 py-2 rounded bg-accent hover:brightness-105 text-bg text-xs flex items-center gap-2 transition disabled:opacity-60 font-medium">
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
-            {refreshing ? "Refreshing…" : "Refresh Prices"}
+            <span className="hidden sm:inline">{refreshing ? "Refreshing…" : "Refresh Prices"}</span>
           </button>
+          <div ref={menuRef} className="relative lg:hidden">
+            <button
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-expanded={menuOpen}
+              aria-haspopup="true"
+              aria-label="More actions"
+              className="nav-touch px-3 py-2 rounded border border-border bg-surface-3 text-text-2 flex items-center"
+            >
+              <MoreHorizontal className="w-3.5 h-3.5" />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full mt-1.5 z-[71] min-w-56 rounded-lg border border-border bg-surface-2 shadow-lg p-2">
+                {save && (
+                  <div className="flex items-center justify-between gap-3 px-2.5 py-2 border-b border-border-subtle mb-1">
+                    <span className="km-section-label">Status</span>
+                    <span className={`km-save ${save.pill}`}>{save.label}</span>
+                  </div>
+                )}
+                <button
+                  onClick={() => { setMenuOpen(false); setShowSettings((v) => !v); }}
+                  className="nav-touch w-full flex items-center gap-2.5 px-2.5 py-2 rounded text-left text-xs text-text-2 hover:text-text hover:bg-surface-3"
+                >
+                  <Settings className="w-3.5 h-3.5 shrink-0" /> Settings
+                </button>
+                <button
+                  onClick={() => { setMenuOpen(false); takeSnapshot(); }}
+                  disabled={snapshotting || refreshing || dataLoading || !!dataError}
+                  className="nav-touch w-full flex items-center gap-2.5 px-2.5 py-2 rounded text-left text-xs text-text-2 hover:text-text hover:bg-surface-3 disabled:opacity-50"
+                >
+                  <Camera className={`w-3.5 h-3.5 shrink-0 ${snapshotting ? "animate-pulse" : ""}`} />
+                  {snapshotting ? "Snapshotting…" : "Snapshot + Copy JSON"}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
       {refreshMsg && <div className="max-w-[1500px] mx-auto px-6 pb-3 text-xs text-accent font-mono">{refreshMsg}</div>}

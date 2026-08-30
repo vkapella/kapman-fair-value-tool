@@ -36,7 +36,7 @@ function ScoreMarker({ isPinned }) {
 
 // Row detail sheet (<1024px): the five category points that leave the table
 // when the priority columns take over, with the pin/model marker per row.
-function RowDetailSheet({ row, onClose }) {
+function RowDetailSheet({ row, onClose, onOpenCategory }) {
   useEffect(() => {
     const onKey = (event) => { if (event.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
@@ -70,13 +70,18 @@ function RowDetailSheet({ row, onClose }) {
         {CATEGORY_COLUMNS.map((key) => {
           const isPinned = (row.pinnedCategories || []).includes(key);
           return (
-            <div key={key} className="nav-touch flex items-center justify-between py-2 border-b border-border-subtle last:border-b-0">
+            <button
+              key={key}
+              onClick={() => onOpenCategory(row.ticker, key)}
+              className="nav-touch w-full flex items-center justify-between py-2 border-b border-border-subtle last:border-b-0 text-left hover:text-accent"
+            >
               <span className="text-xs text-text-2">{RUBRIC_DEF[key].label}</span>
-              <span>
+              <span className="flex items-center">
                 <span className="tabular-nums font-mono text-xs font-bold text-text">{row[key]}</span>
                 <ScoreMarker isPinned={isPinned} />
+                <ChevronRight className="w-3.5 h-3.5 ml-1 text-text-3" />
               </span>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -84,7 +89,7 @@ function RowDetailSheet({ row, onClose }) {
   );
 }
 
-export default function ScoreCardTable({ rows, updateStock, removeStock, stocks, sortBy, sortDir, sortToggle }) {
+export default function ScoreCardTable({ rows, updateStock, removeStock, stocks, sortBy, sortDir, sortToggle, onOpenCategory }) {
   const [detailTicker, setDetailTicker] = useState(null);
   const detailRow = rows.find((r) => r.ticker === detailTicker) || null;
 
@@ -161,7 +166,16 @@ export default function ScoreCardTable({ rows, updateStock, removeStock, stocks,
           </tbody>
         </table>
       </div>
-      {detailRow && <RowDetailSheet row={detailRow} onClose={() => setDetailTicker(null)} />}
+      {detailRow && (
+        <RowDetailSheet
+          row={detailRow}
+          onClose={() => setDetailTicker(null)}
+          onOpenCategory={(ticker, category) => {
+            setDetailTicker(null);
+            onOpenCategory?.(ticker, category);
+          }}
+        />
+      )}
     </div>
   );
 }

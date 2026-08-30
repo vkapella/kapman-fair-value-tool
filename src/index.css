@@ -17,10 +17,8 @@
 @tailwind utilities;
 
 :root {
-  /* Chip width scale (decision 36) — additive only; UI-C applies these. */
-  --chip-w-1: 48px;
-  --chip-w-2: 64px;
-  --chip-w-3: 84px;
+  /* --chip-w-1/2/3 come from the vendored theme (kapman-ui.css @ tradelog
+     8cddb2d), reachable via the min-w-chip-* Tailwind aliases. */
 
   /* App-local signal-border tints, mirroring the theme's --accent-border. */
   --pos-border: color-mix(in srgb, var(--pos) 40%, transparent);

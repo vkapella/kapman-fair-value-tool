@@ -124,6 +124,8 @@ export default function CategoryGrid({ category, rows, stocks, factors, computed
                     </div>
                   </td>
                   <td className="px-2 py-2 text-right">
+                    {/* UI-C: deliberately content-sized — "{n} unassessed" is
+                        open-ended, so this set takes no width step. */}
                     {unassessed > 0
                       ? <span className="font-mono text-[10px] text-warn">{unassessed} unassessed</span>
                       : <span className="font-mono text-[10px] text-pos">assessed</span>}

@@ -50,7 +50,10 @@ export default function ScoreCardTable({ rows, updateStock, removeStock, stocks,
                     return (
                       <td key={key} className="px-2 py-2 text-right">
                         <span className="tabular-nums font-mono text-xs font-bold text-text">{r[key]}</span>
-                        <span className={`ml-1.5 text-[9px] uppercase font-mono ${isPinned ? "text-warn" : "text-text-4"}`} title={isPinned ? "Operator override is pinned" : "Live model score"}>{isPinned ? "pin" : "model"}</span>
+                        {/* UI-C (decision 36): pin/model is a closed set, so the
+                            marker takes the set's step and the column keeps one
+                            edge instead of jittering by label width. */}
+                        <span className={`ml-1.5 inline-block min-w-chip-2 text-center text-[9px] uppercase font-mono ${isPinned ? "text-warn" : "text-text-4"}`} title={isPinned ? "Operator override is pinned" : "Live model score"}>{isPinned ? "pin" : "model"}</span>
                       </td>
                     );
                   })}

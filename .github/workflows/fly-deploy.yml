@@ -35,4 +35,6 @@ jobs:
         if: env.FLY_API_TOKEN != ''
       - name: fly deploy
         if: env.FLY_API_TOKEN != ''
-        run: flyctl deploy --remote-only
+        # GIT_SHA feeds GET /api/version so the header chip carries the
+        # release SHA (UI-1, handoff 260830).
+        run: flyctl deploy --remote-only --build-arg GIT_SHA=${{ github.sha }}

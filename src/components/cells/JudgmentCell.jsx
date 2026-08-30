@@ -9,8 +9,8 @@ export default function JudgmentCell({ field, manual, onChange }) {
       value={assessed ? manual : ""}
       onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
       title={field.description}
-      className={`bg-zinc-900 border border-zinc-800 px-1.5 py-1 text-xs rounded outline-none max-w-[11rem] ${
-        assessed ? "text-zinc-100" : "text-zinc-500 italic"
+      className={`bg-surface-3 border border-border px-1.5 py-1 text-xs rounded outline-none max-w-[11rem] ${
+        assessed ? "text-text" : "text-text-3 italic"
       }`}
     >
       <option value="" className="italic">— not assessed —</option>

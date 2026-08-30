@@ -286,7 +286,7 @@ export default function App() {
   }), [rows]);
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+    <div className="min-h-screen bg-bg text-text">
       <div className="grid-bg min-h-screen">
         <Header
           storageStatus={storageStatus}
@@ -350,7 +350,7 @@ export default function App() {
               )}
             </>
           )}
-          <div className="mt-8 text-[10px] text-zinc-600 font-mono leading-relaxed">
+          <div className="mt-8 text-[10px] text-text-3 font-mono leading-relaxed">
             <p>Scoring rubric (max 100): Valuation 20 · Growth 20 · Moat 20 · Execution Risk 10 · Economy 30. Score ≥75 = potential buy.</p>
             <p className="mt-1">Allocation signals are algorithmic defaults. Override per your conviction. Not financial advice.</p>
           </div>

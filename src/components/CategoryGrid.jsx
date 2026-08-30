@@ -31,37 +31,37 @@ export default function CategoryGrid({ category, rows, stocks, factors, computed
   };
 
   return (
-    <div className="rounded-lg border border-zinc-800 overflow-hidden bg-zinc-950">
-      <div className="px-4 py-3 border-b border-zinc-800">
+    <div className="rounded-lg border border-border overflow-hidden bg-surface">
+      <div className="px-4 py-3 border-b border-border">
         <h2 className="font-display text-lg font-bold">{def.label.replace(/\s*\/\d+$/, "")} Factors</h2>
-        <p className="text-[11px] text-zinc-500 font-mono">
+        <p className="text-[11px] text-text-3 font-mono">
           Every displayed factor feeds this category score. Model outputs are read-only; fetched values are dimmed and manual overrides are bright with a ● marker.
-          Judgment fields default to <span className="text-zinc-400"> — not assessed — </span> until you set them.
+          Judgment fields default to <span className="text-text-2"> — not assessed — </span> until you set them.
         </p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-zinc-900/50">
+          <thead className="bg-surface-2">
             <tr className="hairline">
               <SortHeader col="ticker" label="Ticker" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} align="left" />
               {derivedFields.map((field) => (
-                <th key={field.key} title={fieldTitle(field)} className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-zinc-500">
-                  {field.label}<span className="block text-[9px] text-zinc-600">{weightLabel(field)}</span>
+                <th key={field.key} title={fieldTitle(field)} className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-text-3">
+                  {field.label}<span className="block text-[9px] text-text-4">{weightLabel(field)}</span>
                 </th>
               ))}
               {def.quantitativeFields.map((field) => (
-                <th key={field.key} title={fieldTitle(field)} className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-zinc-500">
-                  {field.label}<span className="block text-[9px] text-zinc-600">{weightLabel(field)}</span>
+                <th key={field.key} title={fieldTitle(field)} className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-text-3">
+                  {field.label}<span className="block text-[9px] text-text-4">{weightLabel(field)}</span>
                 </th>
               ))}
               {def.qualitativeFields.map((field) => (
-                <th key={field.key} title={fieldTitle(field)} className="px-2 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-zinc-500">
-                  {field.label}<span className="block text-[9px] text-zinc-600">{weightLabel(field)}</span>
+                <th key={field.key} title={fieldTitle(field)} className="px-2 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-text-3">
+                  {field.label}<span className="block text-[9px] text-text-4">{weightLabel(field)}</span>
                 </th>
               ))}
               <SortHeader col={category} label="Category Score" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-              <th className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-zinc-500">Unassessed</th>
-              <th className="px-2 py-2 text-center text-[10px] uppercase tracking-wider font-medium text-zinc-500">Pin</th>
+              <th className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-text-3">Unassessed</th>
+              <th className="px-2 py-2 text-center text-[10px] uppercase tracking-wider font-medium text-text-3">Pin</th>
             </tr>
           </thead>
           <tbody>
@@ -74,10 +74,10 @@ export default function CategoryGrid({ category, rows, stocks, factors, computed
               const unassessed = def.qualitativeFields.filter((f) => tickerFactors[f.key]?.manual == null).length;
 
               return (
-                <tr key={r.ticker} className="hairline hover:bg-zinc-900/30 group">
-                  <td className="px-3 py-2 font-mono text-xs text-zinc-200">{r.ticker}</td>
+                <tr key={r.ticker} className="hairline hover:bg-surface-2 group">
+                  <td className="px-3 py-2 font-mono text-xs text-text">{r.ticker}</td>
                   {derivedFields.map((field) => (
-                    <td key={field.key} title={field.description} className="px-2 py-2 text-right tabular-nums font-mono text-xs text-zinc-300">
+                    <td key={field.key} title={field.description} className="px-2 py-2 text-right tabular-nums font-mono text-xs text-text">
                       {formatFieldValue(r[field.key], field.format)}
                     </td>
                   ))}
@@ -119,14 +119,14 @@ export default function CategoryGrid({ category, rows, stocks, factors, computed
                         width="w-12"
                       />
                       {isPinned && comp != null && comp !== effective && (
-                        <span className="tabular-nums font-mono text-[10px] text-zinc-600">model {comp}</span>
+                        <span className="tabular-nums font-mono text-[10px] text-text-4">model {comp}</span>
                       )}
                     </div>
                   </td>
                   <td className="px-2 py-2 text-right">
                     {unassessed > 0
-                      ? <span className="font-mono text-[10px] text-amber-300">{unassessed} unassessed</span>
-                      : <span className="font-mono text-[10px] text-emerald-400">assessed</span>}
+                      ? <span className="font-mono text-[10px] text-warn">{unassessed} unassessed</span>
+                      : <span className="font-mono text-[10px] text-pos">assessed</span>}
                   </td>
                   <td className="px-2 py-2">
                     <div className="flex items-center justify-center">
@@ -135,7 +135,7 @@ export default function CategoryGrid({ category, rows, stocks, factors, computed
                         title={isPinned
                           ? "Pinned: your number is in force. Unpin to let the model's computed value take over — safe and reversible, re-pinning restores your number exactly."
                           : "Unpinned: the model's computed value is live and updates automatically. Pin to lock in your own number instead."}
-                        className={`p-1 rounded transition ${isPinned ? "text-emerald-400 hover:text-emerald-300" : "text-zinc-600 hover:text-zinc-300"}`}
+                        className={`p-1 rounded transition ${isPinned ? "text-warn hover:opacity-80" : "text-text-4 hover:text-text"}`}
                       >
                         {isPinned ? <Pin className="w-3.5 h-3.5" /> : <PinOff className="w-3.5 h-3.5" />}
                       </button>

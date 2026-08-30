@@ -1,27 +1,60 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,700;9..144,900&display=swap');
+/* Self-hosted Geist + Geist Mono (replaces the Google Fonts CDN import). */
+@import "@fontsource/geist-sans/400.css";
+@import "@fontsource/geist-sans/500.css";
+@import "@fontsource/geist-sans/600.css";
+@import "@fontsource/geist-sans/700.css";
+@import "@fontsource/geist-mono/400.css";
+@import "@fontsource/geist-mono/500.css";
+@import "@fontsource/geist-mono/600.css";
+
+/* Vendored KapMan theme — copied verbatim from kapman-tradelog/design/
+   (decision 04: changes land there first, then re-copy). Loads before all
+   app CSS. kapman-grid.css joins with the AG Grid migration (UI-5). */
+@import "./design/kapman-ui.css";
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root {
-  height: 100%;
-  background: #09090b;
-  color: #f4f4f5;
+:root {
+  /* Chip width scale (decision 36) — additive only; UI-C applies these. */
+  --chip-w-1: 48px;
+  --chip-w-2: 64px;
+  --chip-w-3: 84px;
+
+  /* App-local signal-border tints, mirroring the theme's --accent-border. */
+  --pos-border: color-mix(in srgb, var(--pos) 40%, transparent);
+  --warn-border: color-mix(in srgb, var(--warn) 40%, transparent);
+  --neg-border: color-mix(in srgb, var(--neg) 40%, transparent);
 }
 
+html, body, #root {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* This repo's base type is 13px (UI-0): the app previously inherited
+   Tailwind's 16px root. The vendored theme's 12.5px was measured against
+   Tradelog, not here; the copy stays verbatim, so the override lives here. */
+body {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* Fraunces is retired: display type is Geist 600. */
 .font-display {
-  font-family: 'Fraunces', Georgia, serif;
-  font-feature-settings: 'ss01';
+  font-family: var(--sans);
+  font-weight: 600;
 }
 
 .font-mono, .tabular-nums {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--mono);
   font-variant-numeric: tabular-nums;
 }
 
 .hairline {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .grid-bg {

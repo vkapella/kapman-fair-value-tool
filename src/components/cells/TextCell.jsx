@@ -10,11 +10,11 @@ export default function TextCell({ value, onChange, width = "w-20", uppercase = 
       <input autoFocus value={draft}
         onChange={(e) => setDraft(e.target.value)} onBlur={commit}
         onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(value); setEditing(false); } }}
-        className={`${width} bg-zinc-900 border border-emerald-500/60 px-1.5 py-1 text-zinc-100 font-mono text-xs rounded outline-none`} />
+        className={`${width} bg-surface-3 border border-accent px-1.5 py-1 text-text font-mono text-xs rounded outline-none`} />
     );
   }
   return (
     <button onClick={() => setEditing(true)}
-      className={`${width} text-left font-mono text-xs px-1.5 py-1 hover:bg-zinc-800/60 rounded transition`}>{value}</button>
+      className={`${width} text-left font-mono text-xs px-1.5 py-1 hover:bg-surface-3 rounded transition`}>{value}</button>
   );
 }

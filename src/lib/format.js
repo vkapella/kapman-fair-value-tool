@@ -6,18 +6,18 @@ export const fmtMoney = (n) => (
 export const fmtPctIV = (pct) => (pct == null ? "—" : `${pct.toFixed(2)}%`);
 
 export const ivColor = (pct) =>
-  pct == null ? "text-zinc-600"
-  : pct < 80 ? "text-emerald-400" : pct < 100 ? "text-emerald-300" : pct < 110 ? "text-amber-300" : "text-rose-400";
+  pct == null ? "text-text-4"
+  : pct < 80 ? "text-pos" : pct < 100 ? "text-pos" : pct < 110 ? "text-warn" : "text-neg";
 export const ivBg = (pct) =>
-  pct == null ? "bg-zinc-800/40 border-zinc-700/40"
-  : pct < 80 ? "bg-emerald-500/20 border-emerald-500/40"
-  : pct < 100 ? "bg-emerald-500/10 border-emerald-500/30"
-  : pct < 110 ? "bg-amber-500/10 border-amber-500/30"
-  : "bg-rose-500/10 border-rose-500/30";
+  pct == null ? "bg-surface-3 border-border"
+  : pct < 80 ? "bg-pos-dim border-pos-border"
+  : pct < 100 ? "bg-pos-dim border-pos-border"
+  : pct < 110 ? "bg-warn-dim border-warn-border"
+  : "bg-neg-dim border-neg-border";
 export const scoreColor = (s) =>
-  s >= 80 ? "bg-emerald-500 text-emerald-950"
-  : s >= 75 ? "bg-emerald-400 text-emerald-950"
-  : s >= 65 ? "bg-amber-400 text-amber-950" : "bg-zinc-600 text-zinc-200";
+  s >= 80 ? "bg-pos text-bg"
+  : s >= 75 ? "bg-accent text-bg"
+  : s >= 65 ? "bg-warn text-bg" : "bg-surface-3 text-text-2";
 
 export function formatFieldValue(value, format) {
   if (value == null || value === "") return "—";

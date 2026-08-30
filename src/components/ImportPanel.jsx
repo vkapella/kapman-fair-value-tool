@@ -17,11 +17,11 @@ function formatNumber(value, digits = 2) {
 
 function Section({ title, subtitle, count, children }) {
   return (
-    <div className="border-t border-zinc-800 first:border-t-0">
-      <div className="px-4 py-2.5 flex items-baseline gap-2 bg-zinc-900/40">
-        <h3 className="text-xs uppercase tracking-wider font-medium text-zinc-300">{title}</h3>
-        <span className="text-[10px] font-mono text-zinc-500">({count})</span>
-        {subtitle && <span className="text-[10px] text-zinc-500 font-mono ml-auto">{subtitle}</span>}
+    <div className="border-t border-border first:border-t-0">
+      <div className="px-4 py-2.5 flex items-baseline gap-2 bg-surface-2">
+        <h3 className="text-xs uppercase tracking-wider font-medium text-text">{title}</h3>
+        <span className="text-[10px] font-mono text-text-3">({count})</span>
+        {subtitle && <span className="text-[10px] text-text-3 font-mono ml-auto">{subtitle}</span>}
       </div>
       {children}
     </div>
@@ -94,16 +94,16 @@ export default function ImportPanel({ onImported }) {
   }
 
   return (
-    <div className="rounded-lg border border-zinc-800 overflow-hidden bg-zinc-950">
-      <div className="px-4 py-3 border-b border-zinc-800">
+    <div className="rounded-lg border border-border overflow-hidden bg-surface">
+      <div className="px-4 py-3 border-b border-border">
         <h2 className="font-display text-lg font-bold">Ticker Import</h2>
-        <p className="text-[11px] text-zinc-500 font-mono">
+        <p className="text-[11px] text-text-3 font-mono">
           Paste symbols to preview provider-backed additions. Existing tickers are skipped; new rows start unpinned.
         </p>
       </div>
 
       <div className="p-4">
-        <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+        <label className="block text-[10px] uppercase tracking-wider text-text-3 mb-1.5">
           Tickers — comma, space, or newline separated
         </label>
         <textarea
@@ -111,24 +111,24 @@ export default function ImportPanel({ onImported }) {
           onChange={(event) => setTickerText(event.target.value)}
           rows={4}
           placeholder={"AAPL, GOOG, JPM\nAVGO"}
-          className="w-full resize-y rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500"
+          className="w-full resize-y rounded border border-border-strong bg-surface-3 px-3 py-2 text-sm font-mono text-text placeholder:text-text-3 focus:outline-none focus:border-accent"
         />
         <div className="mt-2 flex items-center gap-3">
           <button
             onClick={handlePreview}
             disabled={tickers.length === 0 || loading}
-            className="px-4 py-2 rounded bg-zinc-100 hover:bg-white disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed text-zinc-950 text-xs font-medium transition flex items-center gap-2"
+            className="px-4 py-2 rounded bg-accent hover:brightness-105 disabled:bg-surface-3 disabled:text-text-4 disabled:cursor-not-allowed text-bg text-xs font-medium transition flex items-center gap-2"
           >
             {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ListPlus className="w-3.5 h-3.5" />}
             Preview {tickers.length || ""} ticker{tickers.length === 1 ? "" : "s"}
           </button>
-          <span className="text-[10px] text-zinc-500 font-mono">
+          <span className="text-[10px] text-text-3 font-mono">
             Price, GAAP/adjusted EPS, and scoring factors come from Finnhub/Yahoo.
           </span>
         </div>
 
         {error && (
-          <div className="mt-4 rounded border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-300 flex items-start gap-2">
+          <div className="mt-4 rounded border border-neg-border bg-neg-dim px-3 py-2 text-xs text-neg flex items-start gap-2">
             <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span className="font-mono">{error}</span>
           </div>
@@ -137,13 +137,13 @@ export default function ImportPanel({ onImported }) {
 
       {preview && (
         <div>
-          <div className="px-4 py-2 text-[10px] font-mono text-zinc-500 border-t border-zinc-800">
+          <div className="px-4 py-2 text-[10px] font-mono text-text-3 border-t border-border">
             {preview.meta.requested} requested · {preview.meta.addable} addable · source: {preview.source}
           </div>
 
           {preview.adds.length > 0 && (
             <Section title="Provider-backed additions" count={preview.adds.length} subtitle="all selected by default">
-              <div className="px-4 py-2 flex items-center gap-2 border-b border-zinc-900">
+              <div className="px-4 py-2 flex items-center gap-2 border-b border-border-subtle">
                 {[
                   { label: "all", checked: true },
                   { label: "none", checked: false },
@@ -151,36 +151,36 @@ export default function ImportPanel({ onImported }) {
                   <button
                     key={label}
                     onClick={() => setAddChecked(Object.fromEntries(preview.adds.map((add) => [add.ticker, checked])))}
-                    className="px-2 py-1 rounded border border-zinc-800 hover:border-emerald-500/50 hover:text-emerald-300 text-[10px] font-mono text-zinc-400 transition"
+                    className="px-2 py-1 rounded border border-border hover:border-accent-border hover:text-accent text-[10px] font-mono text-text-2 transition"
                   >
                     {label}
                   </button>
                 ))}
-                <span className="ml-auto text-[10px] text-zinc-500 font-mono">
+                <span className="ml-auto text-[10px] text-text-3 font-mono">
                   {selected.length} of {preview.adds.length} selected
                 </span>
               </div>
-              <div className="max-h-80 overflow-y-auto divide-y divide-zinc-900">
+              <div className="max-h-80 overflow-y-auto divide-y divide-border-subtle">
                 {preview.adds.map((add) => (
-                  <label key={add.ticker} className="px-4 py-2.5 flex items-start gap-3 hover:bg-zinc-900/30 cursor-pointer">
+                  <label key={add.ticker} className="px-4 py-2.5 flex items-start gap-3 hover:bg-surface-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      className="mt-1 accent-emerald-500"
+                      className="mt-1 accent-accent"
                       checked={Boolean(addChecked[add.ticker])}
                       onChange={(event) => setAddChecked((current) => ({ ...current, [add.ticker]: event.target.checked }))}
                     />
                     <div className="flex-1 min-w-0">
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs font-mono">
-                        <span className="text-zinc-200 font-semibold">
+                        <span className="text-text font-semibold">
                           {add.ticker}
-                          {add.longName && <span className="block truncate text-[10px] font-normal text-zinc-600">{add.longName}</span>}
+                          {add.longName && <span className="block truncate text-[10px] font-normal text-text-3">{add.longName}</span>}
                         </span>
-                        <span className="text-zinc-500">price ${formatNumber(add.currentPrice)}</span>
-                        <span className="text-zinc-500">Val EPS {formatNumber(add.valuationTtmEps)}</span>
-                        <span className="text-zinc-500">growth {formatNumber(add.growth, 0)}%</span>
-                        <span className="text-zinc-500">%IV {formatNumber(add.pctIV, 1)}</span>
+                        <span className="text-text-3">price ${formatNumber(add.currentPrice)}</span>
+                        <span className="text-text-3">Val EPS {formatNumber(add.valuationTtmEps)}</span>
+                        <span className="text-text-3">growth {formatNumber(add.growth, 0)}%</span>
+                        <span className="text-text-3">%IV {formatNumber(add.pctIV, 1)}</span>
                       </div>
-                      <div className="mt-1 text-[10px] font-mono text-amber-300/80">{add.notes.join(" · ")}</div>
+                      <div className="mt-1 text-[10px] font-mono text-warn">{add.notes.join(" · ")}</div>
                     </div>
                   </label>
                 ))}
@@ -190,11 +190,11 @@ export default function ImportPanel({ onImported }) {
 
           {preview.skips.length > 0 && (
             <Section title="Skipped" count={preview.skips.length}>
-              <div className="max-h-40 overflow-y-auto divide-y divide-zinc-900">
+              <div className="max-h-40 overflow-y-auto divide-y divide-border-subtle">
                 {preview.skips.map((skip) => (
                   <div key={skip.ticker} className="px-4 py-1.5 text-xs font-mono flex items-center gap-2">
-                    <span className="text-zinc-400">{skip.ticker}</span>
-                    <span className="text-zinc-600">{skip.reason}</span>
+                    <span className="text-text-2">{skip.ticker}</span>
+                    <span className="text-text-3">{skip.reason}</span>
                   </div>
                 ))}
               </div>
@@ -202,29 +202,29 @@ export default function ImportPanel({ onImported }) {
           )}
 
           {preview.adds.length === 0 && (
-            <div className="px-4 py-8 text-center text-sm text-zinc-500 font-mono">No new provider-backed tickers to add.</div>
+            <div className="px-4 py-8 text-center text-sm text-text-3 font-mono">No new provider-backed tickers to add.</div>
           )}
 
-          <div className="border-t border-zinc-800 px-4 py-3 flex items-center gap-3 bg-zinc-900/40">
+          <div className="border-t border-border px-4 py-3 flex items-center gap-3 bg-surface-2">
             <button
               onClick={handleApply}
               disabled={selected.length === 0 || applying}
-              className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-400 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed text-emerald-950 text-xs font-medium transition flex items-center gap-2"
+              className="px-4 py-2 rounded bg-accent hover:brightness-105 disabled:bg-surface-3 disabled:text-text-4 disabled:cursor-not-allowed text-bg text-xs font-medium transition flex items-center gap-2"
             >
               {applying && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Add {selected.length} ticker{selected.length === 1 ? "" : "s"}
             </button>
-            <span className="text-[10px] text-zinc-500 font-mono">a snapshot is taken first</span>
+            <span className="text-[10px] text-text-3 font-mono">a snapshot is taken first</span>
             {applyError && (
-              <span className="text-xs text-rose-300 font-mono flex items-center gap-1.5 ml-auto">
+              <span className="text-xs text-neg font-mono flex items-center gap-1.5 ml-auto">
                 <AlertTriangle className="w-3.5 h-3.5" /> {applyError}
               </span>
             )}
           </div>
 
           {applyResult && (
-            <div className="px-4 py-3 border-t border-zinc-800 bg-emerald-500/5">
-              <div className="flex items-center gap-2 text-xs text-emerald-300 font-mono">
+            <div className="px-4 py-3 border-t border-border bg-pos-dim">
+              <div className="flex items-center gap-2 text-xs text-pos font-mono">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 snapshot #{applyResult.snapshotRunId} taken · {applyResult.added} added unpinned
               </div>

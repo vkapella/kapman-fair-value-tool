@@ -10,28 +10,28 @@ export default function TabBar({ topTab, setTopTab, tab, setTab, addStock, dataL
 
   return (
     <div className="max-w-[1500px] mx-auto px-6 pt-6">
-      <div className="flex items-center gap-1 border-b border-zinc-800 overflow-x-auto">
+      <div className="flex items-center gap-1 border-b border-border overflow-x-auto">
         {topTabs.map(({ id, label, icon: Icon }) => (
           <button key={id} onClick={() => setTopTab(id)}
             className={`px-4 py-3 text-xs uppercase tracking-[0.15em] border-b-2 transition flex items-center gap-2 whitespace-nowrap ${
-              topTab === id ? "border-emerald-400 text-emerald-300" : "border-transparent text-zinc-500 hover:text-zinc-300"
+              topTab === id ? "border-accent text-accent" : "border-transparent text-text-3 hover:text-text"
             }`}>
             <Icon className="w-3.5 h-3.5" /> {label}
           </button>
         ))}
         {topTab === "main" && (
           <button onClick={addStock} disabled={dataLoading || !!dataError}
-            className="ml-auto text-xs text-emerald-300 hover:text-emerald-200 px-3 py-2 flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed">
+            className="ml-auto text-xs text-accent hover:text-accent-soft px-3 py-2 flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed">
             <Plus className="w-3.5 h-3.5" /> Add Ticker
           </button>
         )}
       </div>
       {topTab === "main" && (
-        <div className="flex items-center gap-1 border-b border-zinc-800 overflow-x-auto" aria-label="Main Score Card sections">
+        <div className="flex items-center gap-1 border-b border-border overflow-x-auto" aria-label="Main Score Card sections">
           {MAIN_TABS.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setTab(id)}
               className={`px-3 py-2.5 text-[10px] uppercase tracking-[0.12em] border-b-2 transition flex items-center gap-1.5 whitespace-nowrap ${
-                tab === id ? "border-emerald-400 text-emerald-300" : "border-transparent text-zinc-500 hover:text-zinc-300"
+                tab === id ? "border-accent text-accent" : "border-transparent text-text-3 hover:text-text"
               }`}>
               <Icon className="w-3 h-3" /> {label}
             </button>

@@ -20,19 +20,19 @@ function Methodology({ category }) {
   const def = RUBRIC_DEF[category];
   const method = SCORECARD_METHODOLOGY[category];
   return (
-    <details open className="border border-zinc-800 rounded-lg bg-zinc-950 overflow-hidden">
-      <summary className="cursor-pointer list-none px-4 py-3 hover:bg-zinc-900/50">
+    <details open className="border border-border rounded-lg bg-surface overflow-hidden">
+      <summary className="cursor-pointer list-none px-4 py-3 hover:bg-surface-2">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <h3 className="font-display text-base font-bold text-zinc-100">{def.label.replace(/\s*\/\d+$/, "")}</h3>
-          <span className="font-mono text-[11px] text-emerald-300">{def.max} points of the 100-point score ({def.max}%)</span>
+          <h3 className="font-display text-base font-bold text-text">{def.label.replace(/\s*\/\d+$/, "")}</h3>
+          <span className="font-mono text-[11px] text-accent">{def.max} points of the 100-point score ({def.max}%)</span>
         </div>
-        <p className="mt-1 text-xs text-zinc-400">{method.calculation}</p>
+        <p className="mt-1 text-xs text-text-2">{method.calculation}</p>
       </summary>
-      <div className="border-t border-zinc-800">
-        <p className="px-4 py-3 text-xs leading-relaxed text-zinc-400 bg-zinc-900/30"><span className="text-zinc-200">Default when unavailable:</span> {method.defaultBehavior}</p>
+      <div className="border-t border-border">
+        <p className="px-4 py-3 text-xs leading-relaxed text-text-2 bg-surface-2"><span className="text-text">Default when unavailable:</span> {method.defaultBehavior}</p>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[850px] text-left text-xs">
-            <thead className="bg-zinc-900/50 text-[10px] uppercase tracking-wider text-zinc-500">
+            <thead className="bg-surface-2 text-[10px] uppercase tracking-wider text-text-3">
               <tr className="hairline">
                 <th className="px-4 py-2 font-medium">Factor</th>
                 <th className="px-3 py-2 text-right font-medium">Weight</th>
@@ -45,13 +45,13 @@ function Methodology({ category }) {
                 const factor = method.factors[scoreKey];
                 return (
                   <tr key={scoreKey} className="hairline align-top">
-                    <td className="px-4 py-3 font-medium text-zinc-200">{fieldLabel(def, scoreKey)}</td>
-                    <td className="px-3 py-3 text-right font-mono text-emerald-300 whitespace-nowrap">
+                    <td className="px-4 py-3 font-medium text-text">{fieldLabel(def, scoreKey)}</td>
+                    <td className="px-3 py-3 text-right font-mono text-accent whitespace-nowrap">
                       {pct(weight)} of category
-                      <span className="block text-[10px] text-zinc-500">max {(def.max * weight).toFixed(1)} pts overall</span>
+                      <span className="block text-[10px] text-text-3">max {(def.max * weight).toFixed(1)} pts overall</span>
                     </td>
-                    <td className="px-3 py-3 leading-relaxed text-zinc-300">{factor.calculation}</td>
-                    <td className="px-4 py-3 leading-relaxed text-zinc-400">{factor.source}</td>
+                    <td className="px-3 py-3 leading-relaxed text-text">{factor.calculation}</td>
+                    <td className="px-4 py-3 leading-relaxed text-text-2">{factor.source}</td>
                   </tr>
                 );
               })}
@@ -72,17 +72,17 @@ function IntrinsicValueMethodology() {
   ];
 
   return (
-    <details open className="border border-emerald-500/30 rounded-lg bg-zinc-950 overflow-hidden">
-      <summary className="cursor-pointer list-none px-4 py-3 hover:bg-zinc-900/50">
+    <details open className="border border-accent-border rounded-lg bg-surface overflow-hidden">
+      <summary className="cursor-pointer list-none px-4 py-3 hover:bg-surface-2">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <h3 className="font-display text-base font-bold text-zinc-100">Intrinsic Value Calculation</h3>
-          <span className="font-mono text-[11px] text-emerald-300">Feeds % of Intrinsic Value and Allocation Signals</span>
+          <h3 className="font-display text-base font-bold text-text">Intrinsic Value Calculation</h3>
+          <span className="font-mono text-[11px] text-accent">Feeds % of Intrinsic Value and Allocation Signals</span>
         </div>
-        <p className="mt-1 text-xs text-zinc-400">Intrinsic Value = Valuation TTM EPS × (P/E no-growth + Growth Multiplier × IV Growth Assumption %) × (Average AAA Yield ÷ Bond Yield).</p>
+        <p className="mt-1 text-xs text-text-2">Intrinsic Value = Valuation TTM EPS × (P/E no-growth + Growth Multiplier × IV Growth Assumption %) × (Average AAA Yield ÷ Bond Yield).</p>
       </summary>
-      <div className="border-t border-emerald-500/20 overflow-x-auto">
+      <div className="border-t border-accent-border overflow-x-auto">
         <table className="w-full min-w-[850px] text-left text-xs">
-          <thead className="bg-zinc-900/50 text-[10px] uppercase tracking-wider text-zinc-500">
+          <thead className="bg-surface-2 text-[10px] uppercase tracking-wider text-text-3">
             <tr className="hairline">
               <th className="px-4 py-2 font-medium">Factor</th>
               <th className="px-3 py-2 font-medium">Calculation role</th>
@@ -91,41 +91,41 @@ function IntrinsicValueMethodology() {
           </thead>
           <tbody>
             <tr className="hairline align-top">
-              <td className="px-4 py-3 font-medium text-zinc-200">Valuation TTM EPS</td>
-              <td className="px-3 py-3 leading-relaxed text-zinc-300">The earnings-per-share multiplier at the start of the formula.</td>
-              <td className="px-4 py-3 leading-relaxed text-zinc-400">Automatic mode selects the lower positive GAAP or Adjusted TTM EPS. Clicking a source copies it into this field; direct editing makes it Operator-owned and pins it. A pin prevents only valuation EPS refreshes.</td>
+              <td className="px-4 py-3 font-medium text-text">Valuation TTM EPS</td>
+              <td className="px-3 py-3 leading-relaxed text-text">The earnings-per-share multiplier at the start of the formula.</td>
+              <td className="px-4 py-3 leading-relaxed text-text-2">Automatic mode selects the lower positive GAAP or Adjusted TTM EPS. Clicking a source copies it into this field; direct editing makes it Operator-owned and pins it. A pin prevents only valuation EPS refreshes.</td>
             </tr>
             <tr className="hairline align-top">
-              <td className="px-4 py-3 font-medium text-zinc-200">IV Growth Assumption %</td>
-              <td className="px-3 py-3 leading-relaxed text-zinc-300">Per-ticker forward-looking growth input multiplied by the global Growth Multiplier.</td>
-              <td className="px-4 py-3 leading-relaxed text-zinc-400">Operator-owned. Ticker Import starts it at 0% for review. Clicking Suggested IV Growth explicitly copies the recommendation here; provider refresh never overwrites it. Adoption recalculates IV, % of IV, the Valuation score, total score, and allocation gates. It is distinct from provider TTM EPS Growth YoY and does not affect the Growth category score.</td>
+              <td className="px-4 py-3 font-medium text-text">IV Growth Assumption %</td>
+              <td className="px-3 py-3 leading-relaxed text-text">Per-ticker forward-looking growth input multiplied by the global Growth Multiplier.</td>
+              <td className="px-4 py-3 leading-relaxed text-text-2">Operator-owned. Ticker Import starts it at 0% for review. Clicking Suggested IV Growth explicitly copies the recommendation here; provider refresh never overwrites it. Adoption recalculates IV, % of IV, the Valuation score, total score, and allocation gates. It is distinct from provider TTM EPS Growth YoY and does not affect the Growth category score.</td>
             </tr>
             <tr className="hairline align-top">
-              <td className="px-4 py-3 font-medium text-zinc-200">Suggested IV Growth %</td>
-              <td className="px-3 py-3 leading-relaxed text-zinc-300">Advisory value = supported provider-growth evidence after a Graham haircut and classification ceiling. Positive evidence receives a 20% haircut; missing-forward or highly dispersed evidence receives a 35% haircut.</td>
-              <td className="px-4 py-3 leading-relaxed text-zinc-400">Evidence is 50% Yahoo FY+1 consensus EPS growth, 25% Finnhub 3-year EPS growth, and 25% Finnhub 5-year EPS growth; available weights are re-normalized when a series is missing. It cannot exceed a valid ROE × (1 − payout ratio) capacity. Inputs are constrained to −20%…40%; values are rounded to 0.5 points.</td>
+              <td className="px-4 py-3 font-medium text-text">Suggested IV Growth %</td>
+              <td className="px-3 py-3 leading-relaxed text-text">Advisory value = supported provider-growth evidence after a Graham haircut and classification ceiling. Positive evidence receives a 20% haircut; missing-forward or highly dispersed evidence receives a 35% haircut.</td>
+              <td className="px-4 py-3 leading-relaxed text-text-2">Evidence is 50% Yahoo FY+1 consensus EPS growth, 25% Finnhub 3-year EPS growth, and 25% Finnhub 5-year EPS growth; available weights are re-normalized when a series is missing. It cannot exceed a valid ROE × (1 − payout ratio) capacity. Inputs are constrained to −20%…40%; values are rounded to 0.5 points.</td>
             </tr>
             <tr className="hairline align-top">
-              <td className="px-4 py-3 font-medium text-zinc-200">Recommendation caps and confidence</td>
-              <td className="px-3 py-3 leading-relaxed text-zinc-300">Caps: ETF/index 8%; financial 8%; cyclical or evidence spread above 15 points 10%; mature/mega-cap 15%; verified high growth 20%; other operating company 12%.</td>
-              <td className="px-4 py-3 leading-relaxed text-zinc-400">ETF rows receive a 7% low-confidence default because company metrics are not comparable. Company rows abstain without at least two growth observations, or one observation plus a valid capacity check. Confidence falls when evidence is sparse or disagrees.</td>
+              <td className="px-4 py-3 font-medium text-text">Recommendation caps and confidence</td>
+              <td className="px-3 py-3 leading-relaxed text-text">Caps: ETF/index 8%; financial 8%; cyclical or evidence spread above 15 points 10%; mature/mega-cap 15%; verified high growth 20%; other operating company 12%.</td>
+              <td className="px-4 py-3 leading-relaxed text-text-2">ETF rows receive a 7% low-confidence default because company metrics are not comparable. Company rows abstain without at least two growth observations, or one observation plus a valid capacity check. Confidence falls when evidence is sparse or disagrees.</td>
             </tr>
             <tr className="hairline align-top">
-              <td className="px-4 py-3 font-medium text-zinc-200">Current Price</td>
-              <td className="px-3 py-3 leading-relaxed text-zinc-300">% of Intrinsic Value = Current Price ÷ Intrinsic Value × 100.</td>
-              <td className="px-4 py-3 leading-relaxed text-zinc-400">Provider price is the live default; an operator can edit it. It affects % of Intrinsic Value, the Valuation category, and allocation gates—not the intrinsic-value numerator.</td>
+              <td className="px-4 py-3 font-medium text-text">Current Price</td>
+              <td className="px-3 py-3 leading-relaxed text-text">% of Intrinsic Value = Current Price ÷ Intrinsic Value × 100.</td>
+              <td className="px-4 py-3 leading-relaxed text-text-2">Provider price is the live default; an operator can edit it. It affects % of Intrinsic Value, the Valuation category, and allocation gates—not the intrinsic-value numerator.</td>
             </tr>
             {settings.map(([label, defaultValue, behavior]) => (
               <tr key={label} className="hairline align-top">
-                <td className="px-4 py-3 font-medium text-zinc-200">{label}</td>
-                <td className="px-3 py-3 leading-relaxed text-zinc-300">Global formula setting; current default is <span className="font-mono text-emerald-300">{defaultValue}</span>.</td>
-                <td className="px-4 py-3 leading-relaxed text-zinc-400">{behavior}</td>
+                <td className="px-4 py-3 font-medium text-text">{label}</td>
+                <td className="px-3 py-3 leading-relaxed text-text">Global formula setting; current default is <span className="font-mono text-accent">{defaultValue}</span>.</td>
+                <td className="px-4 py-3 leading-relaxed text-text-2">{behavior}</td>
               </tr>
             ))}
             <tr className="hairline align-top">
-              <td className="px-4 py-3 font-medium text-zinc-200">Unavailable result</td>
-              <td className="px-3 py-3 leading-relaxed text-zinc-300">No positive valuation EPS, or a non-positive formula result, produces no intrinsic value.</td>
-              <td className="px-4 py-3 leading-relaxed text-zinc-400">% of Intrinsic Value remains unavailable; Valuation uses its neutral factor default and Allocation Signals abstain rather than classifying the ticker as cheap.</td>
+              <td className="px-4 py-3 font-medium text-text">Unavailable result</td>
+              <td className="px-3 py-3 leading-relaxed text-text">No positive valuation EPS, or a non-positive formula result, produces no intrinsic value.</td>
+              <td className="px-4 py-3 leading-relaxed text-text-2">% of Intrinsic Value remains unavailable; Valuation uses its neutral factor default and Allocation Signals abstain rather than classifying the ticker as cheap.</td>
             </tr>
           </tbody>
         </table>
@@ -143,13 +143,13 @@ export default function DocsPanel() {
     ?.options[DEFAULT_JUDGMENT_OVERRIDES.moatDurability];
 
   return (
-    <section className="rounded-lg border border-zinc-800 overflow-hidden bg-zinc-950">
-      <div className="px-4 py-3 border-b border-zinc-800">
+    <section className="rounded-lg border border-border overflow-hidden bg-surface">
+      <div className="px-4 py-3 border-b border-border">
         <h2 className="font-display text-lg font-bold">Fair Value Tool documentation</h2>
-        <p className="text-[11px] text-zinc-500 font-mono">Live calculation rules, weights, data ownership, and default behavior.</p>
+        <p className="text-[11px] text-text-3 font-mono">Live calculation rules, weights, data ownership, and default behavior.</p>
       </div>
 
-      <div className="grid gap-px bg-zinc-800 md:grid-cols-2">
+      <div className="grid gap-px bg-border md:grid-cols-2">
         <Doc title="Total score">Total Score = Valuation /20 + Growth /20 + Moat /20 + Execution Risk /10 + Economy /30. Each category is rounded to a whole point after its weighted factor calculation; total score is therefore 0–100. Missing factors receive their documented neutral/default score rather than shifting weight to other factors.</Doc>
         <Doc title="Intrinsic value formula">Intrinsic Value = Valuation TTM EPS × (P/E no-growth + Growth Multiplier × IV Growth Assumption %) × (Average AAA Yield ÷ Bond Yield). Defaults in Settings are 7, 1, 4.4%, and 4.4%. If valuation EPS is not positive, or the formula result is not positive, IV and % of IV are unavailable rather than treated as cheap.</Doc>
         <Doc title="EPS selection and pin">GAAP TTM EPS is provider-derived; Adjusted TTM EPS is the sum of four valid Finnhub earnings actuals. When both sources are available, automatic valuation EPS selects the lower positive value. Click either source to copy it into Valuation TTM EPS. Editing Valuation TTM EPS sets the Operator basis and pins it; the EPS pin prevents only that formula input from refreshing.</Doc>
@@ -161,16 +161,16 @@ export default function DocsPanel() {
         <Doc title="Allocation signals">The tool abstains when % of IV is unavailable. Buy Shares requires Score ≥75 and % of IV &lt;110; Sell Puts requires Score ≥75 and % of IV &lt;100; Buy Calls requires Score ≥75 and % of IV &lt;92. Position-size notes are algorithmic defaults, not investment advice.</Doc>
       </div>
 
-      <div className="border-t border-zinc-800 p-4 space-y-3">
+      <div className="border-t border-border p-4 space-y-3">
         <div>
           <h2 className="font-display text-lg font-bold">Scorecard calculations and weights</h2>
-          <p className="mt-1 text-xs leading-relaxed text-zinc-500">Intrinsic value comes first because it produces % of Intrinsic Value, the largest Valuation factor. The category tables then show every live score component. Each factor score is normalized first, multiplied by its category weight, then scaled to the category maximum shown.</p>
+          <p className="mt-1 text-xs leading-relaxed text-text-3">Intrinsic value comes first because it produces % of Intrinsic Value, the largest Valuation factor. The category tables then show every live score component. Each factor score is normalized first, multiplied by its category weight, then scaled to the category maximum shown.</p>
         </div>
         <IntrinsicValueMethodology />
         {CATEGORY_KEYS.map((category) => <Methodology key={category} category={category} />)}
       </div>
 
-      <div className="border-t border-zinc-800 px-4 py-3 text-xs leading-relaxed text-zinc-500">
+      <div className="border-t border-border px-4 py-3 text-xs leading-relaxed text-text-3">
         This is a screening heuristic, not investment advice. Provider coverage, reported earnings definitions, assumptions, and market conditions can be incomplete or wrong; review filings and use independent judgment.
       </div>
     </section>
@@ -178,5 +178,5 @@ export default function DocsPanel() {
 }
 
 function Doc({ title, children }) {
-  return <div className="bg-zinc-950 p-4"><h3 className="text-xs uppercase tracking-wider text-emerald-300">{title}</h3><p className="mt-2 text-sm leading-relaxed text-zinc-400">{children}</p></div>;
+  return <div className="bg-surface p-4"><h3 className="text-xs uppercase tracking-wider text-accent">{title}</h3><p className="mt-2 text-sm leading-relaxed text-text-2">{children}</p></div>;
 }

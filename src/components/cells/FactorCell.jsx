@@ -40,7 +40,7 @@ export default function FactorCell({ fetched, manual, format, onCommit, width = 
           if (e.key === "Enter") commit();
           if (e.key === "Escape") { setDraft(effective ?? ""); setEditing(false); }
         }}
-        className={`${width} bg-zinc-900 border border-emerald-500/60 px-1.5 py-1 ${format === "text" ? "text-left" : "text-right tabular-nums"} text-zinc-100 font-mono text-xs rounded outline-none`}
+        className={`${width} bg-surface-3 border border-accent px-1.5 py-1 ${format === "text" ? "text-left" : "text-right tabular-nums"} text-text font-mono text-xs rounded outline-none`}
       />
     );
   }
@@ -50,18 +50,18 @@ export default function FactorCell({ fetched, manual, format, onCommit, width = 
       <button
         onClick={() => setEditing(true)}
         title={hasOverride ? "Manual override — click to edit" : "Fetched from provider — click to set an override"}
-        className={`${width} ${format === "text" ? "text-left" : "text-right tabular-nums"} font-mono text-xs px-1.5 py-1 hover:bg-zinc-800/60 rounded transition ${
-          hasOverride ? "text-zinc-100" : "text-zinc-500"
+        className={`${width} ${format === "text" ? "text-left" : "text-right tabular-nums"} font-mono text-xs px-1.5 py-1 hover:bg-surface-3 rounded transition ${
+          hasOverride ? "text-text" : "text-text-3"
         }`}
       >
-        {hasOverride && <span className="text-emerald-400 mr-1">●</span>}
+        {hasOverride && <span className="text-accent mr-1">●</span>}
         {formatFieldValue(effective, format)}
       </button>
       {hasOverride && (
         <button
           onClick={(e) => { e.stopPropagation(); onCommit(null); }}
           title="Clear override — revert to fetched value"
-          className="text-zinc-600 hover:text-rose-400 text-[10px] leading-none px-0.5"
+          className="text-text-3 hover:text-neg text-[10px] leading-none px-0.5"
         >
           ×
         </button>

@@ -366,9 +366,6 @@ export default function App() {
                       updateStock={updateStock}
                       removeStock={removeStock}
                       stocks={stocks}
-                      sortBy={sortBy}
-                      sortDir={sortDir}
-                      sortToggle={sortToggle}
                     />
                   </div>
                   <div className={tab === "allocation" ? "" : "hidden"}>

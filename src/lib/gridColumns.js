@@ -45,11 +45,16 @@ export const CHIP_W = { 1: 48, 2: 64, 3: 84 };
 const CELL_PADDING = 30;   // measured: 15px each side in the shipped theme
 const VALUE_ALLOWANCE = 34; // up to three tabular-mono digits, plus the gap
 
-export function columnWidth(headerName, kind = "numeric", { filter = false, chip = null } = {}) {
+/** `content` states the width a cell's own controls need, for the cells that
+ *  hold more than a value — the valuation-EPS cell is an input beside a basis
+ *  label and a pin toggle. Given explicitly so the number is arguable in
+ *  review rather than a magic width. */
+export function columnWidth(headerName, kind = "numeric", { filter = false, chip = null, content = 0 } = {}) {
   const base = KIND_WIDTH[kind];
   if (base == null) throw new Error(`unknown column kind: ${kind}`);
   if (chip != null && CHIP_W[chip] == null) throw new Error(`unknown chip step: ${chip}`);
   const headerFloor = headerWordFloor(headerName) + (filter ? HEADER_AFFORDANCE : 0);
-  const contentFloor = chip == null ? 0 : VALUE_ALLOWANCE + CHIP_W[chip] + CELL_PADDING;
-  return Math.max(base, headerFloor, contentFloor);
+  const chipFloor = chip == null ? 0 : VALUE_ALLOWANCE + CHIP_W[chip] + CELL_PADDING;
+  const contentFloor = content ? content + CELL_PADDING : 0;
+  return Math.max(base, headerFloor, chipFloor, contentFloor);
 }

@@ -8,9 +8,13 @@
 @import "@fontsource/geist-mono/600.css";
 
 /* Vendored KapMan theme — copied verbatim from kapman-tradelog/design/
-   (decision 04: changes land there first, then re-copy). Loads before all
-   app CSS. kapman-grid.css joins with the AG Grid migration (UI-5). */
+   (decision 04: changes land there first, then re-copy). kapman-ui.css loads
+   before all app CSS; kapman-grid.css after it, per the theme README. Both
+   must also come after AG Grid's own stylesheets, since .ag-theme-kapman and
+   .ag-theme-quartz-dark sit on the same element at equal specificity and
+   source order decides which one supplies --ag-background-color. */
 @import "./design/kapman-ui.css";
+@import "./design/kapman-grid.css";
 
 @tailwind base;
 @tailwind components;

@@ -43,8 +43,15 @@ export default function KapmanGrid({
   ariaLabel,
   onGridReady,
   domLayout = "autoHeight",
+  // Rows are --row-h by default. A grid whose cells carry provenance under
+  // the value — the intrinsic table shows each EPS with its source and
+  // timestamp — needs more than one line, so it asks for a multiple of the
+  // token rather than a literal height, keeping UI-7's decision upstream of
+  // this. Raised with Design: the spec has one row height and no variant for
+  // a cell that carries provenance.
+  rowLines = 1,
 }) {
-  const rowHeight = useTokenRowHeight();
+  const rowHeight = useTokenRowHeight() * rowLines;
 
   const defaultColDef = useMemo(() => ({
     // Every column carries an explicit width (see each columnDefs entry) and

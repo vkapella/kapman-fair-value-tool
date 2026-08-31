@@ -1,10 +1,19 @@
+import { useMemo } from "react";
 import { Trash2 } from "lucide-react";
+import KapmanGrid from "./grid/KapmanGrid.jsx";
 import NumCell from "./cells/NumCell.jsx";
 import TextCell from "./cells/TextCell.jsx";
-import SortHeader from "./SortHeader.jsx";
-import EmptyTableRow from "./EmptyTableRow.jsx";
+import { columnWidth, PINNED } from "../lib/gridColumns.js";
 import { fmtMoney, ivColor, ivBg, fmtPctIV, missingMarkerProps } from "../lib/format.js";
 import { chooseBasisPatch, valuationEpsPatch } from "../lib/cellSemantics.js";
+
+// Migrated to AG Grid (UI-5). The inline editors are preserved as cell
+// RENDERERS that host their own edit state, not as AG Grid cell editors: the
+// valuation-EPS cell is a number input plus a basis label plus a pin toggle in
+// one cell, and AG Grid's one-editor-per-cell model cannot express that
+// without splitting the cell and breaking the pinning side effect that lives
+// across it. The semantics themselves live in lib/cellSemantics and are
+// tested, so what is preserved here is preserved provably.
 
 const formatEps = (value) => (typeof value === "number" ? value.toFixed(2) : "—");
 
@@ -58,21 +67,200 @@ function GrowthSuggestion({ row, onChoose }) {
   );
 }
 
-export default function IntrinsicTable({ rows, updateStock, removeStock, stocks, sortBy, sortDir, sortToggle }) {
-  const chooseBasis = (row, idx, value, basis) => {
+export default function IntrinsicTable({ rows, updateStock, removeStock, stocks }) {
+  const indexOf = (ticker) => stocks.findIndex((s) => s.ticker === ticker);
+
+  const chooseBasis = (row, value, basis) => {
+    // The confirm is the guard on an operator's pinned number; it survives the
+    // migration unchanged.
     if (row.epsPinned && !window.confirm(`${row.ticker} valuation EPS is pinned. Replace it with ${basis} EPS and retain the pin?`)) return;
-    updateStock(idx, chooseBasisPatch(row, value, basis));
+    updateStock(indexOf(row.ticker), chooseBasisPatch(row, value, basis));
   };
 
-  const togglePin = (row, idx) => {
+  const togglePin = (row) => {
     if (row.epsPinned) {
       if (window.confirm(`Unpin ${row.ticker} valuation EPS? Source refreshes remain available either way.`)) {
-        updateStock(idx, { epsPinned: false });
+        updateStock(indexOf(row.ticker), { epsPinned: false });
       }
       return;
     }
-    updateStock(idx, { epsPinned: true });
+    updateStock(indexOf(row.ticker), { epsPinned: true });
   };
+
+  const columnDefs = useMemo(() => [
+    {
+      colId: "remove",
+      headerName: "",
+      width: PINNED.actions,
+      pinned: "left",
+      lockPinned: true,
+      suppressMovable: true,
+      sortable: false,
+      cellClass: "km-grid-pinned",
+      cellRenderer: ({ data }) => (
+        <button
+          onClick={() => removeStock(indexOf(data.ticker))}
+          aria-label={`Remove ${data.ticker}`}
+          className="opacity-40 hover:opacity-100 focus-visible:opacity-100 text-text-3 hover:text-neg focus-visible:text-neg rounded transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      ),
+    },
+    {
+      field: "ticker",
+      headerName: "Ticker",
+      width: PINNED.symbol,
+      pinned: "left",
+      lockPinned: true,
+      suppressMovable: true,
+      cellClass: "km-grid-pinned km-grid-pinned--edge",
+      cellRenderer: ({ data }) => (
+        <TextCell value={data.ticker} onChange={(v) => updateStock(indexOf(data.ticker), { ticker: v })} width="w-16" uppercase />
+      ),
+    },
+    {
+      field: "gaapTtmEps",
+      headerName: "GAAP TTM EPS",
+      width: columnWidth("GAAP TTM EPS", "numeric", { filter: true }),
+      type: "rightAligned",
+      filter: "agNumberColumnFilter",
+      cellRenderer: ({ data }) => (
+        <SourceEps
+          value={data.gaapTtmEps} label="GAAP"
+          source={data.eps?.gaap?.source} timestamp={data.eps?.gaap?.fetchedAt}
+          unavailableReason={data.eps?.gaap?.unavailableReason}
+          onChoose={() => chooseBasis(data, data.gaapTtmEps, "reported")}
+        />
+      ),
+    },
+    {
+      field: "adjustedTtmEps",
+      headerName: "Adjusted TTM EPS",
+      width: columnWidth("Adjusted TTM EPS", "numeric", { filter: true }),
+      type: "rightAligned",
+      filter: "agNumberColumnFilter",
+      cellRenderer: ({ data }) => (
+        <SourceEps
+          value={data.adjustedTtmEps} label="Adjusted"
+          source={data.eps?.adjusted?.source} timestamp={data.eps?.adjusted?.fetchedAt}
+          unavailableReason={data.eps?.adjusted?.unavailableReason}
+          onChoose={() => chooseBasis(data, data.adjustedTtmEps, "adjusted")}
+        />
+      ),
+    },
+    {
+      field: "valuationTtmEps",
+      headerName: "Valuation TTM EPS",
+      // 80px input + gap + the basis label and pin toggle stacked beside it.
+      width: columnWidth("Valuation TTM EPS", "text", { filter: true, content: 150 }),
+      filter: "agNumberColumnFilter",
+      cellRenderer: ({ data }) => (
+        <div className="flex items-center justify-end gap-1">
+          <NumCell
+            value={data.valuationTtmEps}
+            onChange={(v) => updateStock(indexOf(data.ticker), valuationEpsPatch(v))}
+            decimals={2}
+            width="w-20"
+          />
+          <div className="text-right">
+            <span className="block text-[9px] uppercase tracking-wider font-mono text-accent">
+              {data.valuationEpsBasis === "adjusted" ? "Adjusted" : data.valuationEpsBasis === "reported" ? "Reported" : "Operator"}
+            </span>
+            <button
+              onClick={() => togglePin(data)}
+              aria-pressed={Boolean(data.epsPinned)}
+              aria-label={`Pin valuation EPS for ${data.ticker}`}
+              title={data.epsPinned ? "Unpin valuation EPS" : "Pin current valuation EPS"}
+              className={`text-[9px] uppercase tracking-wider font-mono ${data.epsPinned ? "text-warn hover:opacity-80" : "text-text-3 hover:text-accent"}`}
+            >
+              {data.epsPinned ? "pinned" : "unpinned"}
+            </button>
+          </div>
+        </div>
+      ),
+    },
+    {
+      colId: "epsDiff",
+      headerName: "Adjusted vs GAAP",
+      width: columnWidth("Adjusted vs GAAP", "numeric", { filter: true }),
+      type: "rightAligned",
+      filter: "agNumberColumnFilter",
+      valueGetter: (params) => (params.data ? epsDifference(params.data.gaapTtmEps, params.data.adjustedTtmEps) : null),
+      cellRenderer: ({ value }) => {
+        const cls = value != null && Math.abs(value) >= 15 ? "text-neg border-neg-border bg-neg-dim"
+          : value != null && Math.abs(value) >= 10 ? "text-warn border-warn-border bg-warn-dim"
+          : "text-text-2 border-border";
+        return (
+          <span {...missingMarkerProps(value)} className={`inline-block px-2 py-0.5 rounded border tabular-nums font-mono text-xs ${cls}`}>
+            {value == null ? "—" : `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`}
+          </span>
+        );
+      },
+    },
+    {
+      field: "growth",
+      headerName: "Operator IV Growth %",
+      width: columnWidth("Operator IV Growth %", "numeric", { filter: true }),
+      type: "rightAligned",
+      filter: "agNumberColumnFilter",
+      cellRenderer: ({ data }) => (
+        <NumCell value={data.growth} onChange={(v) => updateStock(indexOf(data.ticker), { growth: v })} decimals={1} suffix="%" width="w-20" />
+      ),
+    },
+    {
+      field: "suggestedGrowth",
+      headerName: "Suggested IV Growth %",
+      // The suggestion is a three-line button: value, confidence, delta.
+      width: columnWidth("Suggested IV Growth %", "text", { filter: true, content: 170 }),
+      type: "rightAligned",
+      filter: "agNumberColumnFilter",
+      cellRenderer: ({ data }) => (
+        <GrowthSuggestion row={data} onChoose={() => updateStock(indexOf(data.ticker), { growth: data.growthRecommendation.value })} />
+      ),
+    },
+    {
+      field: "iv",
+      headerName: "Intrinsic Value",
+      width: columnWidth("Intrinsic Value", "numeric", { filter: true }),
+      type: "rightAligned",
+      filter: "agNumberColumnFilter",
+      cellRenderer: ({ value }) => (
+        <span {...missingMarkerProps(value)} className="tabular-nums font-mono text-xs text-text">{fmtMoney(value)}</span>
+      ),
+    },
+    {
+      field: "currentPrice",
+      headerName: "Current Price",
+      width: columnWidth("Current Price", "numeric", { filter: true }),
+      type: "rightAligned",
+      filter: "agNumberColumnFilter",
+      cellRenderer: ({ data }) => (
+        <NumCell value={data.currentPrice} onChange={(v) => updateStock(indexOf(data.ticker), { currentPrice: v })} decimals={2} width="w-24" />
+      ),
+    },
+    {
+      field: "pctIV",
+      headerName: "% of Intrinsic Value",
+      width: columnWidth("% of Intrinsic Value", "numeric", { filter: true }),
+      type: "rightAligned",
+      filter: "agNumberColumnFilter",
+      cellRenderer: ({ value }) => (
+        <span {...missingMarkerProps(value)} className={`inline-block px-2 py-0.5 rounded border tabular-nums font-mono text-xs ${ivBg(value)} ${ivColor(value)}`}>
+          {fmtPctIV(value)}
+        </span>
+      ),
+    },
+    {
+      field: "updated",
+      headerName: "Updated Date",
+      width: columnWidth("Updated Date", "date", { filter: true }),
+      filter: "agTextColumnFilter",
+      cellRenderer: ({ data }) => (
+        <TextCell value={data.updated} onChange={(v) => updateStock(indexOf(data.ticker), { updated: v })} width="w-16" />
+      ),
+    },
+  ], [stocks, updateStock, removeStock]);
 
   return (
     <div className="rounded-lg border border-border overflow-hidden bg-surface">
@@ -83,43 +271,15 @@ export default function IntrinsicTable({ rows, updateStock, removeStock, stocks,
         </div>
         <div className="text-[10px] text-text-3 font-mono whitespace-nowrap">Intrinsic Value = Valuation EPS × (PE_no_growth + g × IV Growth Assumption%) × (Avg_AAA_Yield / Bond_Yield)</div>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-surface-2"><tr className="hairline">
-            <SortHeader col="ticker" label="Ticker" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} align="left" />
-            <SortHeader col="gaapTtmEps" label="GAAP TTM EPS" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-            <SortHeader col="adjustedTtmEps" label="Adjusted TTM EPS" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-            <SortHeader col="valuationTtmEps" label="Valuation TTM EPS" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-            <th className="px-2 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-text-3">Adjusted vs GAAP</th>
-            <SortHeader col="growth" label="Operator IV Growth %" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-            <SortHeader col="suggestedGrowth" label="Suggested IV Growth %" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-            <SortHeader col="iv" label="Intrinsic Value" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-            <SortHeader col="currentPrice" label="Current Price" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-            <SortHeader col="pctIV" label="% of Intrinsic Value" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-            <th className="px-2 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-text-3">Updated Date</th>
-          </tr></thead>
-          <tbody>
-            {rows.length === 0 ? <EmptyTableRow colSpan={11} message="No stocks tracked. Add a ticker to calculate intrinsic value." /> : rows.map((r) => {
-              const idx = stocks.findIndex((s) => s.ticker === r.ticker);
-              const difference = epsDifference(r.gaapTtmEps, r.adjustedTtmEps);
-              const diffClass = difference != null && Math.abs(difference) >= 15 ? "text-neg border-neg-border bg-neg-dim" : difference != null && Math.abs(difference) >= 10 ? "text-warn border-warn-border bg-warn-dim" : "text-text-2 border-border";
-              return <tr key={r.ticker} className="hairline hover:bg-surface-2 group">
-                <td className="px-3 py-2"><div className="flex items-center gap-2"><TextCell value={r.ticker} onChange={(v) => updateStock(idx, { ticker: v })} width="w-16" uppercase /><button onClick={() => removeStock(idx)} aria-label={`Remove ${r.ticker}`} className="opacity-40 hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100 text-text-3 hover:text-neg focus-visible:text-neg rounded transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"><Trash2 className="w-3.5 h-3.5" /></button></div></td>
-                <td className="px-2 py-2 text-right"><SourceEps value={r.gaapTtmEps} label="GAAP" source={r.eps?.gaap?.source} timestamp={r.eps?.gaap?.fetchedAt} unavailableReason={r.eps?.gaap?.unavailableReason} onChoose={() => chooseBasis(r, idx, r.gaapTtmEps, "reported")} /></td>
-                <td className="px-2 py-2 text-right"><SourceEps value={r.adjustedTtmEps} label="Adjusted" source={r.eps?.adjusted?.source} timestamp={r.eps?.adjusted?.fetchedAt} unavailableReason={r.eps?.adjusted?.unavailableReason} onChoose={() => chooseBasis(r, idx, r.adjustedTtmEps, "adjusted")} /></td>
-                <td className="px-2 py-2 text-right"><div className="flex items-center justify-end gap-1"><NumCell value={r.valuationTtmEps} onChange={(v) => updateStock(idx, valuationEpsPatch(v))} decimals={2} width="w-20" /><div className="text-right"><span className="block text-[9px] uppercase tracking-wider font-mono text-accent">{r.valuationEpsBasis === "adjusted" ? "Adjusted" : r.valuationEpsBasis === "reported" ? "Reported" : "Operator"}</span><button onClick={() => togglePin(r, idx)} title={r.epsPinned ? "Unpin valuation EPS" : "Pin current valuation EPS"} className={`text-[9px] uppercase tracking-wider font-mono ${r.epsPinned ? "text-warn hover:opacity-80" : "text-text-3 hover:text-accent"}`}>{r.epsPinned ? "pinned" : "unpinned"}</button></div></div></td>
-                <td className="px-2 py-2 text-right"><span className={`inline-block px-2 py-0.5 rounded border tabular-nums font-mono text-xs ${diffClass}`}>{difference == null ? "—" : `${difference >= 0 ? "+" : ""}${difference.toFixed(1)}%`}</span></td>
-                <td className="px-2 py-2 text-right"><NumCell value={r.growth} onChange={(v) => updateStock(idx, { growth: v })} decimals={1} suffix="%" width="w-20" /></td>
-                <td className="px-2 py-2 text-right"><GrowthSuggestion row={r} onChoose={() => updateStock(idx, { growth: r.growthRecommendation.value })} /></td>
-                <td className="px-2 py-2 text-right tabular-nums font-mono text-xs text-text">{fmtMoney(r.iv)}</td>
-                <td className="px-2 py-2 text-right"><NumCell value={r.currentPrice} onChange={(v) => updateStock(idx, { currentPrice: v })} decimals={2} width="w-24" /></td>
-                <td className="px-2 py-2 text-right"><span {...missingMarkerProps(r.pctIV)} className={`inline-block px-2 py-0.5 rounded border tabular-nums font-mono text-xs ${ivBg(r.pctIV)} ${ivColor(r.pctIV)}`}>{fmtPctIV(r.pctIV)}</span></td>
-                <td className="px-2 py-2 text-text-3 font-mono text-xs"><TextCell value={r.updated} onChange={(v) => updateStock(idx, { updated: v })} width="w-16" /></td>
-              </tr>;
-            })}
-          </tbody>
-        </table>
-      </div>
+      <KapmanGrid
+        rows={rows}
+        columnDefs={columnDefs}
+        ariaLabel="Intrinsic value calculation"
+        getRowId={(params) => params.data.ticker}
+        defaultSort={[{ colId: "score", sort: "desc" }]}
+        // Three lines: the value, its provenance, and the delta line.
+        rowLines={3}
+      />
     </div>
   );
 }

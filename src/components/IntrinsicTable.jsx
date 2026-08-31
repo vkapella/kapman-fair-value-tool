@@ -115,8 +115,12 @@ export default function IntrinsicTable({ rows, updateStock, removeStock, stocks 
       lockPinned: true,
       suppressMovable: true,
       cellClass: "km-grid-pinned km-grid-pinned--edge",
+      // w-full, not a pixel width: the 76px pinned column is the one that
+      // cannot meet the width sum (decision 50), so its cell text is what
+      // yields. w-16 plus the editor's own px-1.5 came to 88px inside a 74px
+      // content box and overflowed the frozen boundary on every row.
       cellRenderer: ({ data }) => (
-        <TextCell value={data.ticker} onChange={(v) => updateStock(indexOf(data.ticker), { ticker: v })} width="w-16" uppercase />
+        <TextCell value={data.ticker} onChange={(v) => updateStock(indexOf(data.ticker), { ticker: v })} width="w-full" uppercase />
       ),
     },
     {

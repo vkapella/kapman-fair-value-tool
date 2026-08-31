@@ -162,9 +162,13 @@ export default function ScoreCardTable({ rows, updateStock, removeStock, stocks,
         updateStock(indexOf(params.data.ticker), { ticker: next });
         return true;
       },
+      // Decision 50's yield order, in the one column that cannot meet the
+      // width sum: the ticker truncates, the override dot never shrinks.
+      // flex-1 min-w-0 overrides the theme's fixed 76px on the symbol span so
+      // the text yields the dot's width instead of pushing it out of the cell.
       cellRenderer: ({ data }) => (
         <span className="flex items-center gap-1.5">
-          <span className="km-grid-col-symbol text-accent">{data.ticker}</span>
+          <span className="km-grid-col-symbol text-accent flex-1 min-w-0 truncate">{data.ticker}</span>
           {hasOverrideBeyondEconomy(data) && (
             <span className="md:hidden w-1.5 h-1.5 rounded-full bg-warn shrink-0" title="Holds an operator override — open the row detail for which" />
           )}

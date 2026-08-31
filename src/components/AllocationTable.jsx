@@ -8,8 +8,10 @@ import { ivColor, fmtPctIV, scoreColor, missingMarkerProps } from "../lib/format
 // it is where the header filters the acceptance line asks for live: a set
 // filter on each signal column and a numeric range on Score and % of IV.
 
+// Cell text is the first thing to yield when the 76px pinned column runs out
+// (decision 50); furniture never does.
 const TickerCell = ({ value }) => (
-  <span className="km-grid-col-symbol text-accent">{value}</span>
+  <span className="km-grid-col-symbol text-accent block w-full truncate">{value}</span>
 );
 
 const ScoreCell = ({ value }) => (

@@ -13,8 +13,10 @@ export default function TextCell({ value, onChange, width = "w-20", uppercase = 
         className={`${width} bg-surface-3 border border-accent px-1.5 py-1 text-text font-mono text-xs rounded outline-none`} />
     );
   }
+  // truncate: in the pinned symbol column the cell text is what yields when
+  // the column cannot meet its width sum (decision 50).
   return (
     <button onClick={() => setEditing(true)}
-      className={`${width} text-left font-mono text-xs px-1.5 py-1 hover:bg-surface-3 rounded transition`}>{value}</button>
+      className={`${width} text-left font-mono text-xs px-1.5 py-1 hover:bg-surface-3 rounded transition truncate`}>{value}</button>
   );
 }

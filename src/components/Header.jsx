@@ -47,9 +47,9 @@ function VersionChip() {
         aria-expanded={open}
         aria-label="Release details"
         title={info.sha}
-        // Bounded and truncating: the version string is external input, and an
-        // unbounded chip paints over the header.
-        className="km-version-chip cursor-pointer max-w-[13ch] overflow-hidden text-ellipsis whitespace-nowrap"
+        // The bound and truncation live in .km-version-chip now (theme
+        // 099890c): the primitive owns them for every sibling.
+        className="km-version-chip cursor-pointer"
       >
         {info.version}
       </button>

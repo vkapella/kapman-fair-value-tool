@@ -29,3 +29,16 @@ test("a filterable header reserves room for its sort and filter affordances", ()
 test("an unknown column kind is a mistake, not a silent default", () => {
   assert.throws(() => columnWidth("Ticker", "wingding"), /unknown column kind/);
 });
+
+test("a column whose cells carry an enumerated chip is wide enough to hold one", () => {
+  // UI-C puts a 64px pin/model marker beside every category score. Without a
+  // content floor the value clipped to "18…" behind its own marker.
+  const withChip = columnWidth("Moat /20", "numeric", { filter: true, chip: 2 });
+  const withoutChip = columnWidth("Moat /20", "numeric", { filter: true });
+  assert.ok(withChip > withoutChip);
+  assert.ok(withChip >= 34 + 64 + 30);
+});
+
+test("an unknown chip step is a mistake, not a silent default", () => {
+  assert.throws(() => columnWidth("Moat /20", "numeric", { chip: 9 }), /unknown chip step/);
+});

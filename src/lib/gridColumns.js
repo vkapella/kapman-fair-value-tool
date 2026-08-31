@@ -36,9 +36,20 @@ export function headerWordFloor(headerName) {
  *  specified apart. */
 export const HEADER_AFFORDANCE = 40;
 
-export function columnWidth(headerName, kind = "numeric", { filter = false } = {}) {
+/** UI-C chip steps, repeated here because a column whose cells carry an
+ *  enumerated chip must be wide enough to hold one. The width rules budget
+ *  for the header but not for the cell, and UI-C mandates a 64px chip beside
+ *  every category score — so the two rules cropped each other until this
+ *  floor existed. Filed for Design with the header-affordance finding. */
+export const CHIP_W = { 1: 48, 2: 64, 3: 84 };
+const CELL_PADDING = 30;   // measured: 15px each side in the shipped theme
+const VALUE_ALLOWANCE = 34; // up to three tabular-mono digits, plus the gap
+
+export function columnWidth(headerName, kind = "numeric", { filter = false, chip = null } = {}) {
   const base = KIND_WIDTH[kind];
   if (base == null) throw new Error(`unknown column kind: ${kind}`);
-  const floor = headerWordFloor(headerName) + (filter ? HEADER_AFFORDANCE : 0);
-  return Math.max(base, floor);
+  if (chip != null && CHIP_W[chip] == null) throw new Error(`unknown chip step: ${chip}`);
+  const headerFloor = headerWordFloor(headerName) + (filter ? HEADER_AFFORDANCE : 0);
+  const contentFloor = chip == null ? 0 : VALUE_ALLOWANCE + CHIP_W[chip] + CELL_PADDING;
+  return Math.max(base, headerFloor, contentFloor);
 }

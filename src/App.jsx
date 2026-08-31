@@ -354,9 +354,6 @@ export default function App() {
                       updateStock={updateStock}
                       removeStock={removeStock}
                       stocks={stocks}
-                      sortBy={sortBy}
-                      sortDir={sortDir}
-                      sortToggle={sortToggle}
                       onOpenCategory={(ticker, category) => {
                         setSelectedTicker(ticker);
                         selectMainTab(category);
@@ -375,7 +372,7 @@ export default function App() {
                     />
                   </div>
                   <div className={tab === "allocation" ? "" : "hidden"}>
-                    <AllocationTable rows={sorted} sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
+                    <AllocationTable rows={sorted} />
                   </div>
                   {CATEGORY_KEYS.map((category) => (
                     <div key={category} className={tab === category ? "" : "hidden"}>

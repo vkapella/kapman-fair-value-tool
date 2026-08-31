@@ -1,19 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, Trash2, X } from "lucide-react";
-import TextCell from "./cells/TextCell.jsx";
-import SortHeader from "./SortHeader.jsx";
-import EmptyTableRow from "./EmptyTableRow.jsx";
+import KapmanGrid from "./grid/KapmanGrid.jsx";
 import Legend from "./Legend.jsx";
+import { columnWidth, PINNED } from "../lib/gridColumns.js";
 import { RUBRIC_DEF } from "../lib/rubric.js";
 import { ivColor, scoreColor, fmtPctIV, missingMarkerProps } from "../lib/format.js";
 
-const CATEGORY_COLUMNS = [
-  "valuation",
-  "growthScore",
-  "moat",
-  "executionRisk",
-  "economy",
-];
+const CATEGORY_COLUMNS = ["valuation", "growthScore", "moat", "executionRisk", "economy"];
+
+const CATEGORY_HEADERS = {
+  valuation: "Valuation /20",
+  growthScore: "Growth /20",
+  moat: "Moat /20",
+  executionRisk: "Exec Risk /10",
+  economy: "Economy /30",
+};
 
 // Below 768px a single amber dot beside the ticker means the row holds an
 // operator override beyond the watchlist-wide Economy pin; the detail sheet
@@ -27,8 +28,7 @@ function ScoreMarker({ isPinned }) {
        set's step and the column keeps one edge instead of jittering. */
     <span
       // Non-text marker at --text-4 (UI-0 step 5) — sanctioned, so the
-      // contrast gate allowlists it. Its meaning is carried by the word
-      // itself, not by the colour.
+      // contrast gate allowlists it. Its meaning is carried by the word.
       data-contrast-exempt=""
       className={`ml-1.5 inline-block min-w-chip-2 text-center text-[9px] uppercase font-mono ${isPinned ? "text-warn" : "text-text-4"}`}
       title={isPinned ? "Operator override is pinned" : "Live model score"}
@@ -38,8 +38,6 @@ function ScoreMarker({ isPinned }) {
   );
 }
 
-// Row detail sheet (<1024px): the five category points that leave the table
-// when the priority columns take over, with the pin/model marker per row.
 function RowDetailSheet({ row, onClose, onOpenCategory }) {
   useEffect(() => {
     const onKey = (event) => { if (event.key === "Escape") onClose(); };
@@ -64,14 +62,9 @@ function RowDetailSheet({ row, onClose, onOpenCategory }) {
           <div className="flex items-center gap-3">
             <span className="font-mono font-semibold text-sm">{row.ticker}</span>
             <span className={`inline-flex items-center justify-center w-12 py-1 rounded font-mono font-bold text-xs ${scoreColor(row.score)}`}>{row.score}</span>
-            <span className={`tabular-nums font-mono text-xs ${ivColor(row.pctIV)}`}>{fmtPctIV(row.pctIV)} of IV</span>
+            <span {...missingMarkerProps(row.pctIV)} className={`tabular-nums font-mono text-xs ${ivColor(row.pctIV)}`}>{fmtPctIV(row.pctIV)} of IV</span>
           </div>
-          <button
-            autoFocus
-            onClick={onClose}
-            aria-label="Close detail"
-            className="nav-touch p-2 rounded text-text-3 hover:text-text"
-          >
+          <button autoFocus onClick={onClose} aria-label="Close detail" className="nav-touch p-2 rounded text-text-3 hover:text-text">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -97,9 +90,139 @@ function RowDetailSheet({ row, onClose, onOpenCategory }) {
   );
 }
 
-export default function ScoreCardTable({ rows, updateStock, removeStock, stocks, sortBy, sortDir, sortToggle, onOpenCategory }) {
+/** Below 1024px the priority columns are Ticker, % of IV and Score; the five
+ *  category points move into the row detail sheet (UI-3). */
+function useIsWide() {
+  const read = () => (typeof window === "undefined" ? true : window.matchMedia("(min-width: 1024px)").matches);
+  const [wide, setWide] = useState(read);
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1024px)");
+    const update = () => setWide(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return wide;
+}
+
+export default function ScoreCardTable({ rows, updateStock, removeStock, stocks, onOpenCategory }) {
   const [detailTicker, setDetailTicker] = useState(null);
   const detailRow = rows.find((r) => r.ticker === detailTicker) || null;
+  const isWide = useIsWide();
+  const [api, setApi] = useState(null);
+
+  // Column visibility has to move through the API: AG Grid keeps its own
+  // column state once the grid exists and ignores a changed `hide` in
+  // replaced columnDefs, so crossing 1024px would otherwise only take effect
+  // on a reload.
+  useEffect(() => {
+    if (!api) return;
+    api.setColumnsVisible(CATEGORY_COLUMNS, isWide);
+    api.setColumnsVisible(["detail"], !isWide);
+  }, [api, isWide]);
+
+  const indexOf = (ticker) => stocks.findIndex((s) => s.ticker === ticker);
+
+  const columnDefs = useMemo(() => [
+    {
+      colId: "remove",
+      headerName: "",
+      width: PINNED.actions,
+      pinned: "left",
+      lockPinned: true,
+      suppressMovable: true,
+      sortable: false,
+      // km-grid-pinned lets the control stretch instead of carrying its own
+      // pixel height, which is what keeps the pinned and centre panes in
+      // lockstep rather than drifting a fraction of a pixel per row.
+      cellClass: "km-grid-pinned",
+      cellRenderer: ({ data }) => (
+        <button
+          onClick={() => removeStock(indexOf(data.ticker))}
+          aria-label={`Remove ${data.ticker}`}
+          className="opacity-40 hover:opacity-100 focus-visible:opacity-100 text-text-3 hover:text-neg focus-visible:text-neg rounded transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      ),
+    },
+    {
+      field: "ticker",
+      headerName: "Ticker",
+      width: PINNED.symbol,
+      pinned: "left",
+      lockPinned: true,
+      suppressMovable: true,
+      cellClass: "km-grid-pinned km-grid-pinned--edge",
+      editable: true,
+      // Uppercasing lives in the setter so it applies however the cell is
+      // committed — Enter, blur, or a paste — and a no-op edit writes nothing.
+      valueSetter: (params) => {
+        const next = String(params.newValue || "").toUpperCase();
+        if (!next || next === params.oldValue) return false;
+        updateStock(indexOf(params.data.ticker), { ticker: next });
+        return true;
+      },
+      cellRenderer: ({ data }) => (
+        <span className="flex items-center gap-1.5">
+          <span className="km-grid-col-symbol text-accent">{data.ticker}</span>
+          {hasOverrideBeyondEconomy(data) && (
+            <span className="md:hidden w-1.5 h-1.5 rounded-full bg-warn shrink-0" title="Holds an operator override — open the row detail for which" />
+          )}
+        </span>
+      ),
+    },
+    {
+      field: "pctIV",
+      headerName: "% of Intrinsic Value",
+      width: columnWidth("% of Intrinsic Value", "numeric", { filter: true }),
+      type: "rightAligned",
+      filter: "agNumberColumnFilter",
+      cellRenderer: ({ value }) => (
+        <span {...missingMarkerProps(value)} className={`tabular-nums font-mono text-xs ${ivColor(value)}`}>{fmtPctIV(value)}</span>
+      ),
+    },
+    ...CATEGORY_COLUMNS.map((key) => ({
+      field: key,
+      headerName: CATEGORY_HEADERS[key],
+      // chip: 2 — every category cell carries the 64px pin/model marker.
+      width: columnWidth(CATEGORY_HEADERS[key], "numeric", { filter: true, chip: 2 }),
+      type: "rightAligned",
+      filter: "agNumberColumnFilter",
+      hide: !isWide,
+      cellRenderer: ({ data, value }) => (
+        <span>
+          <span className="tabular-nums font-mono text-xs font-bold text-text">{value}</span>
+          <ScoreMarker isPinned={(data.pinnedCategories || []).includes(key)} />
+        </span>
+      ),
+    })),
+    {
+      field: "score",
+      headerName: "Score",
+      width: columnWidth("Score", "numeric", { filter: true }),
+      type: "rightAligned",
+      filter: "agNumberColumnFilter",
+      cellRenderer: ({ value }) => (
+        <span className={`inline-flex items-center justify-center w-12 py-0.5 rounded font-mono font-bold text-xs ${scoreColor(value)}`}>{value}</span>
+      ),
+    },
+    {
+      colId: "detail",
+      headerName: "",
+      width: 44,
+      sortable: false,
+      hide: isWide,
+      cellRenderer: ({ data }) => (
+        <button
+          onClick={() => setDetailTicker(data.ticker)}
+          aria-label={`Category detail for ${data.ticker}`}
+          className="nav-touch p-1 rounded text-text-3 hover:text-text"
+        >
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+      ),
+    },
+  ], [isWide, stocks, removeStock, updateStock]);
 
   return (
     <div className="rounded-lg border border-border overflow-hidden bg-surface">
@@ -110,70 +233,14 @@ export default function ScoreCardTable({ rows, updateStock, removeStock, stocks,
         </div>
         <Legend />
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-surface-2">
-            <tr className="hairline">
-              <SortHeader col="ticker" label="Ticker" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} align="left" />
-              <SortHeader col="pctIV" label="% of Intrinsic Value" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-              {/* Priority columns below 1024px are Ticker, % of IV and Score;
-                  the five category points move to the row detail sheet. */}
-              <SortHeader col="valuation" label="Valuation /20" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} className="hidden lg:table-cell" />
-              <SortHeader col="growthScore" label="Growth /20" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} className="hidden lg:table-cell" />
-              <SortHeader col="moat" label="Moat /20" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} className="hidden lg:table-cell" />
-              <SortHeader col="executionRisk" label="Exec Risk /10" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} className="hidden lg:table-cell" />
-              <SortHeader col="economy" label="Economy /30" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} className="hidden lg:table-cell" />
-              <SortHeader col="score" label="Score" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-              <th className="w-8 lg:hidden"></th>
-              <th className="w-8"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? <EmptyTableRow colSpan={10} message="No stocks tracked. Add a ticker to start the watchlist." /> : rows.map((r) => {
-              const idx = stocks.findIndex((s) => s.ticker === r.ticker);
-              return (
-                <tr key={r.ticker} className="hairline hover:bg-surface-2 group">
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1.5">
-                      <TextCell value={r.ticker} onChange={(v) => updateStock(idx, { ticker: v })} width="w-16" uppercase />
-                      {hasOverrideBeyondEconomy(r) && (
-                        <span className="md:hidden w-1.5 h-1.5 rounded-full bg-warn shrink-0" title="Holds an operator override — open the row detail for which" />
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-2 py-2 text-right"><span {...missingMarkerProps(r.pctIV)} className={`tabular-nums font-mono text-xs ${ivColor(r.pctIV)}`}>{fmtPctIV(r.pctIV)}</span></td>
-                  {CATEGORY_COLUMNS.map((key) => {
-                    const isPinned = (r.pinnedCategories || []).includes(key);
-                    return (
-                      <td key={key} className="px-2 py-2 text-right hidden lg:table-cell">
-                        <span className="tabular-nums font-mono text-xs font-bold text-text">{r[key]}</span>
-                        <ScoreMarker isPinned={isPinned} />
-                      </td>
-                    );
-                  })}
-                  <td className="px-2 py-2 text-right">
-                    <span className={`inline-flex items-center justify-center w-12 py-1 rounded font-mono font-bold text-xs ${scoreColor(r.score)}`}>{r.score}</span>
-                  </td>
-                  <td className="px-2 py-2 text-right lg:hidden">
-                    <button
-                      onClick={() => setDetailTicker(r.ticker)}
-                      aria-label={`Category detail for ${r.ticker}`}
-                      className="nav-touch p-1 rounded text-text-3 hover:text-text"
-                    >
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
-                  </td>
-                  <td className="px-2 py-2 text-right">
-                    <button onClick={() => removeStock(idx)} aria-label={`Remove ${r.ticker}`} className="opacity-40 hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100 text-text-3 hover:text-neg focus-visible:text-neg rounded transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <KapmanGrid
+        rows={rows}
+        columnDefs={columnDefs}
+        ariaLabel="Main score card"
+        getRowId={(params) => params.data.ticker}
+        defaultSort={[{ colId: "score", sort: "desc" }]}
+        onGridReady={(event) => setApi(event.api)}
+      />
       {detailRow && (
         <RowDetailSheet
           row={detailRow}

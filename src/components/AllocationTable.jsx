@@ -1,49 +1,116 @@
-import SortHeader from "./SortHeader.jsx";
-import EmptyTableRow from "./EmptyTableRow.jsx";
-import SignalText from "./SignalText.jsx";
+import { useMemo } from "react";
+import KapmanGrid from "./grid/KapmanGrid.jsx";
+import SetFilter from "./grid/SetFilter.jsx";
+import { columnWidth, PINNED } from "../lib/gridColumns.js";
 import { ivColor, fmtPctIV, scoreColor, missingMarkerProps } from "../lib/format.js";
 
-export default function AllocationTable({ rows, sortBy, sortDir, sortToggle }) {
+// Migrated to AG Grid (UI-5). Read-only, so it carries no cell editors — but
+// it is where the header filters the acceptance line asks for live: a set
+// filter on each signal column and a numeric range on Score and % of IV.
+
+const TickerCell = ({ value }) => (
+  <span className="km-grid-col-symbol text-accent">{value}</span>
+);
+
+const ScoreCell = ({ value }) => (
+  <span className={`inline-flex items-center justify-center w-12 py-0.5 rounded font-mono font-bold text-xs ${scoreColor(value)}`}>
+    {value}
+  </span>
+);
+
+const PctIvCell = ({ value }) => (
+  <span {...missingMarkerProps(value)} className={`tabular-nums font-mono text-xs ${ivColor(value)}`}>
+    {fmtPctIV(value)}
+  </span>
+);
+
+const SignalCell = ({ value }) => {
+  if (value === "no") return <span className="text-text-3 text-xs font-mono">no</span>;
+  if (value === "ON RADAR") return <span className="text-warn text-xs font-mono">ON RADAR</span>;
+  return (
+    <span className="inline-flex items-center gap-1.5 text-pos text-xs font-mono">
+      <span className="w-1.5 h-1.5 rounded-full bg-pos"></span>{value}
+    </span>
+  );
+};
+
+/** Buy Shares is a boolean plus a size; flattened to the one string an
+ *  operator actually reads, so it sorts and filters as that signal. */
+const buySharesValue = (row) => (row.buyShares ? `YES ${row.buySharesPct}%` : "no");
+
+export default function AllocationTable({ rows }) {
+  const columnDefs = useMemo(() => [
+    {
+      field: "ticker",
+      headerName: "Ticker",
+      width: PINNED.symbol,
+      // Pinned at every width including 390px, so scrolling the metric
+      // columns never takes the row's identity with it.
+      pinned: "left",
+      lockPinned: true,
+      suppressMovable: true,
+      cellRenderer: TickerCell,
+      // No filter here: the pinned group is fixed at 40+44+76=160px, and a
+      // filter button does not fit beside the label at 76px. Identity is
+      // what this column is for; the metric columns carry the filters.
+      filter: false,
+    },
+    {
+      field: "score",
+      headerName: "Score",
+      width: columnWidth("Score", "numeric", { filter: true }),
+      type: "rightAligned",
+      cellRenderer: ScoreCell,
+      filter: "agNumberColumnFilter",
+    },
+    {
+      field: "pctIV",
+      headerName: "% of Intrinsic Value",
+      width: columnWidth("% of Intrinsic Value", "numeric", { filter: true }),
+      type: "rightAligned",
+      cellRenderer: PctIvCell,
+      filter: "agNumberColumnFilter",
+    },
+    {
+      colId: "buyShares",
+      headerName: "Buy Shares",
+      width: columnWidth("Buy Shares", "text", { filter: true }),
+      valueGetter: (params) => (params.data ? buySharesValue(params.data) : null),
+      cellRenderer: SignalCell,
+      filter: SetFilter,
+      filterParams: { getValue: (node) => buySharesValue(node.data) },
+    },
+    {
+      field: "sellPutsNote",
+      headerName: "Sell Puts",
+      width: columnWidth("Sell Puts", "notes", { filter: true }),
+      cellRenderer: SignalCell,
+      filter: SetFilter,
+      filterParams: { getValue: (node) => node.data?.sellPutsNote },
+    },
+    {
+      field: "buyCallsNote",
+      headerName: "Buy Calls",
+      width: columnWidth("Buy Calls", "notes", { filter: true }),
+      cellRenderer: SignalCell,
+      filter: SetFilter,
+      filterParams: { getValue: (node) => node.data?.buyCallsNote },
+    },
+  ], []);
+
   return (
     <div className="rounded-lg border border-border overflow-hidden bg-surface">
       <div className="px-4 py-3 border-b border-border">
         <h2 className="font-display text-lg font-bold">Allocation Signals</h2>
         <p className="text-[11px] text-text-3 font-mono">Algorithmic defaults from Score × % of Intrinsic Value.</p>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-surface-2">
-            <tr className="hairline">
-              <SortHeader col="ticker" label="Ticker" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} align="left" />
-              <SortHeader col="score" label="Score" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-              <SortHeader col="pctIV" label="% of Intrinsic Value" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
-              <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-text-3">Buy Shares</th>
-              <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-text-3">Sell Puts</th>
-              <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-text-3">Buy Calls</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? <EmptyTableRow colSpan={6} message="No stocks tracked. Add a ticker to generate allocation signals." /> : rows.map((r) => (
-              <tr key={r.ticker} className="hairline hover:bg-surface-2">
-                <td className="px-3 py-2 font-mono font-medium">{r.ticker}</td>
-                <td className="px-2 py-2 text-right">
-                  <span className={`inline-flex items-center justify-center w-12 py-0.5 rounded font-mono font-bold text-xs ${scoreColor(r.score)}`}>{r.score}</span>
-                </td>
-                <td className="px-2 py-2 text-right"><span {...missingMarkerProps(r.pctIV)} className={`tabular-nums font-mono text-xs ${ivColor(r.pctIV)}`}>{fmtPctIV(r.pctIV)}</span></td>
-                <td className="px-3 py-2">
-                  {r.buyShares ? (
-                    <span className="inline-flex items-center gap-1.5 text-pos text-xs font-mono">
-                      <span className="w-1.5 h-1.5 rounded-full bg-pos"></span>YES {r.buySharesPct}%
-                    </span>
-                  ) : <span className="text-text-3 text-xs font-mono">no</span>}
-                </td>
-                <td className="px-3 py-2"><SignalText note={r.sellPutsNote} /></td>
-                <td className="px-3 py-2"><SignalText note={r.buyCallsNote} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <KapmanGrid
+        rows={rows}
+        columnDefs={columnDefs}
+        ariaLabel="Allocation signals"
+        getRowId={(params) => params.data.ticker}
+        defaultSort={[{ colId: "score", sort: "desc" }]}
+      />
     </div>
   );
 }

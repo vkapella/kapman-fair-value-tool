@@ -30,7 +30,9 @@ export default function DestinationNav({ topTab, setTopTab }) {
             // from somewhere that survives it.
             aria-label={label}
             title={label}
-            className="km-nav-item nav-touch"
+            // The 44px coarse-pointer floor lives in .km-nav-item now
+            // (theme 6d78e55), so no local touch class here.
+            className="km-nav-item"
           >
             <Icon className="km-nav-icon" aria-hidden="true" />
             <span className="km-nav-label">

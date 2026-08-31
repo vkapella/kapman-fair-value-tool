@@ -25,6 +25,11 @@ jobs:
       # stock palette classes, raw colour literals, token escapes, off-scale
       # z-indexes, and app CSS that re-implements a theme primitive — the
       # regression that shipped in a sibling app unnoticed.
+      #
+      # The script's vendor-integrity rule needs the authoring repo's design/
+      # alongside this checkout, which CI does not have. It prints a loud WARN
+      # and SKIPS rather than passing silently; that rule is enforced locally
+      # at re-vendor time against the sibling clone.
       - name: Design system
         run: npm run lint:design
 

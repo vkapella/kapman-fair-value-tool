@@ -24,10 +24,10 @@
   /* --chip-w-1/2/3 come from the vendored theme (kapman-ui.css @ tradelog
      8cddb2d), reachable via the min-w-chip-* Tailwind aliases. */
 
-  /* App-local signal-border tints, mirroring the theme's --accent-border. */
-  --pos-border: color-mix(in srgb, var(--pos) 40%, transparent);
-  --warn-border: color-mix(in srgb, var(--warn) 40%, transparent);
-  --neg-border: color-mix(in srgb, var(--neg) 40%, transparent);
+  /* --pos-border / --warn-border / --neg-border now come from the vendored
+     theme at 30% (decision 49). The app-local 40% improvisations that stood
+     here are deleted rather than re-pointed: the Tailwind aliases already
+     resolve through var(), so every call site moves with the token. */
 
   /* design-lint-allow: a 2%-white hairline texture, not a semantic colour —
      the token scale has no entry for a decorative overlay and should not gain
@@ -52,8 +52,20 @@ html {
   min-height: 100dvh;
 }
 
-/* ≥44px touch targets for nav controls on coarse pointers below lg: (UI-2). */
-@media (pointer: coarse) and (max-width: 1023px) {
+/* ≥44px touch targets for the controls this app builds from Tailwind rather
+   than from a theme primitive (UI-2).
+
+   The width clause came off for the same reason it came off the theme's rule
+   (decision 54): `(pointer: coarse)` already matches finger-primary devices
+   only, and the width bound wrongly denied the floor to a 12.9" iPad at
+   1366px landscape. The ruling names the theme's five controls, but this
+   utility is the same statement in app CSS — left scoped to <1024 it would
+   put a 44px .km-nav-item beside a 34px .nav-touch button in that one view,
+   which is the inconsistency the ruling exists to end.
+
+   Row density is NOT covered by this and keeps its width clause: see
+   KapmanGrid's useTokenRowHeight, which follows the ladder, not the pointer. */
+@media (pointer: coarse) {
   .nav-touch {
     min-height: 44px;
   }

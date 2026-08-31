@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 // Design-system lint (handoff 260830).
 //
+// Authored here, adopted by kapman-tradelog, improved there, and copied back
+// verbatim except for paths (kapman-tradelog@2336389). Tradelog owns the
+// shared theme, so the shared tooling now lives alongside it and travels the
+// same way the CSS does — including the vendor-integrity rule, which this
+// copy did not previously carry.
+//
 // Why this exists: the Screener shipped a hand-rolled equivalent of the shared
 // theme — one `km-` usage against 43 available primitives — and nothing caught
 // it until someone thought to grep. Reviewing for "did you use the theme?" is
@@ -14,13 +20,28 @@
 //
 // Usage: node scripts/check-design-system.mjs [--json]
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, extname, join, relative } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(ROOT, "src");
+// This repo CONSUMES the theme: its copy lives in src/design/ and its own
+// token block is src/index.css.
 const THEME = join(SRC, "design", "kapman-ui.css");
+// Vendor integrity (decision 04: "copy VERBATIM ... do not edit the copies").
+// A consuming repo holds its copy under VENDOR_DIR and must match the source
+// of truth byte for byte. THEME_SOURCE points at the authoring repo's design/;
+// when it is absent (CI without the sibling checkout) the rule SKIPS loudly
+// rather than passing silently. In the authoring repo VENDOR_DIR === the
+// source, so the rule is a self-comparison and trivially passes.
+const VENDOR_DIR = process.env.KAPMAN_VENDOR_DIR
+  ? resolve(process.env.KAPMAN_VENDOR_DIR)
+  : join(SRC, "design");
+const THEME_SOURCE = process.env.KAPMAN_THEME_SOURCE
+  ? resolve(process.env.KAPMAN_THEME_SOURCE)
+  : join(ROOT, "..", "kapman-tradelog", "design");
+const VENDORED_FILES = ["kapman-ui.css", "kapman-grid.css"];
 const APP_CSS = join(SRC, "index.css");
 
 const findings = [];
@@ -32,8 +53,9 @@ function walk(dir, out = []) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) {
       if (entry === "design") continue; // the vendored theme is not ours to lint
+      if (entry === "node_modules" || entry === "__tests__") continue;
       walk(full, out);
-    } else if ([".jsx", ".js", ".tsx", ".ts"].includes(extname(entry))) {
+    } else if ([".jsx", ".js", ".tsx", ".ts"].includes(extname(entry)) && !entry.includes(".test.")) {
       out.push(full);
     }
   }
@@ -48,11 +70,17 @@ const MAX_COMMENT_LINES = 6;
 // above it — so a reason long enough to be worth reading can wrap across
 // lines. Walking back stops at the previous statement, which keeps a marker
 // from silently covering code further down the file.
+const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/;
+
 function allowed(lines, index) {
   if (MARKER.test(lines[index])) return true;
   for (let i = index - 1; i >= 0 && index - i <= MAX_COMMENT_LINES; i -= 1) {
     if (MARKER.test(lines[i])) return true;
-    if (CODE_BOUNDARY.test(lines[i])) break;
+    // Only real code ends the walk-back. Prose inside a comment routinely
+    // contains a semicolon, and treating that as a statement boundary made a
+    // multi-line reason silently fail to suppress — the worst failure mode
+    // for a tool whose whole value is being trusted.
+    if (!COMMENT_LINE.test(lines[i]) && CODE_BOUNDARY.test(lines[i])) break;
   }
   return false;
 }
@@ -95,11 +123,18 @@ for (const file of walk(SRC)) {
 
 // ---------------------------------------------------------------------------
 // Rule 4 — raw colour literals. A hex in app code is a token that was not
-// looked up. The vendored theme is exempt; it is where values are allowed to
-// live.
+// looked up. Two things are exempt because they are where values legitimately
+// live: the vendored theme, and the app's own token-definition file.
+//
+// Hex must be 6 or 8 digits. The 3-digit form matched this repo's GitHub issue
+// references — `(#340)`, `#344` — 63 of them, which is most of what this rule
+// originally reported. A 3-digit CSS colour is not worth reintroducing that
+// noise for; none of the three apps uses one.
 // ---------------------------------------------------------------------------
-const COLOR_RE = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\boklch\(/g;
-for (const file of [...walk(SRC), APP_CSS]) {
+const COLOR_RE = /#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?\b|\brgba?\(|\bhsla?\(|\boklch\(/g;
+// APP_CSS is the app's :root — the token definitions themselves. Linting it
+// for raw colour asks the source of truth to look itself up.
+for (const file of walk(SRC).filter((f) => f !== APP_CSS)) {
   const lines = readFileSync(file, "utf8").split("\n");
   lines.forEach((text, i) => {
     if (allowed(lines, i)) return;
@@ -111,10 +146,89 @@ for (const file of [...walk(SRC), APP_CSS]) {
 }
 
 // ---------------------------------------------------------------------------
-// Rule 5 — shadowed primitives. This is the Screener's actual failure mode:
-// re-implementing a theme primitive locally rather than using it. Any app CSS
-// rule that repeats most of a primitive's declarations is that primitive,
-// hand-rolled.
+// Rule 5 — shadowed primitives, and the coverage count below.
+//
+// Both only mean something in a repo that CONSUMES the vendored theme. The
+// authoring repo (Tradelog) writes kapman-ui.css and never loads it — it
+// re-expresses the same primitives as Tailwind utilities — so it scored 0/39
+// and had its own `body` reported as a hand-rolled `.km-btn`. Those were
+// false signals, not findings. Gate both on whether the app actually imports
+// the theme.
+// Does this repo CONSUME the vendored theme, or AUTHOR it? Three rules depend
+// on the answer — shadowed-primitive, token parity, and the coverage count —
+// because a consuming app has no :root and no reason to restate a primitive,
+// while the authoring app has both by definition.
+const CONSUMES_THEME = /@import[^;]*kapman-ui\.css|kapman-ui\.css["']/.test(
+  readFileSync(APP_CSS, "utf8") + walk(SRC).map((f) => readFileSync(f, "utf8")).join("\n"),
+);
+
+// ---------------------------------------------------------------------------
+// Rule 6 — token parity between the app's :root and the vendored theme.
+//
+// The authoring repo defines its tokens twice: once in its own :root, once in
+// design/kapman-ui.css for the siblings to vendor. Nothing kept them in step
+// except memory. This makes a divergence a build failure instead of a silent
+// difference between production and what the other two apps copy.
+//
+// Restructuring into a shared tokens file would also fix it, but would force
+// both siblings to vendor a third file and break their builds until they did.
+// This gets the same protection at no coordination cost.
+const APP_ONLY_TOKENS = new Map([
+  ["--chart-purple", "app-local by design ruling — chart series identity is not a semantic token"],
+  ["--vgrid-cols", "app-internal grid template, set inline per table; never a theme token"],
+]);
+
+function parseTokens(css) {
+  const tokens = new Map();
+  // Every definition of each token, in source order — NOT just the last one.
+  // A token is often defined once in :root and overridden in a media query,
+  // and the two files format that override differently (one multi-line, one
+  // inline), so comparing only the final value compares different things.
+  //
+  // Normalise structure before matching rather than dropping the line anchor:
+  // an unanchored match reads BEM selectors as declarations, because
+  // `.km-btn--primary:hover` and `.km-cell--overridden::before` both contain
+  // `--name:`. Splitting on braces and semicolons puts every real declaration
+  // at the start of its own line, so the anchor can stay.
+  const normalised = css.replace(/([{};])/g, "$1\n");
+  for (const match of normalised.matchAll(/^\s*(--[a-z0-9-]+):\s*([^;]+);/gm)) {
+    const value = match[2].replace(/\s*\/\*.*/, "").trim();
+    tokens.set(match[1], [...(tokens.get(match[1]) ?? []), value]);
+  }
+  return tokens;
+}
+
+const sameValues = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+// Skipped entirely in a consuming repo. The Screener imports the theme and
+// deliberately has NO :root of its own — deleting it was the point of its
+// UI-1 — so this rule demanded it hand-duplicate 48 token declarations, which
+// is precisely the drift the rule exists to prevent. Reported by the Screener
+// against 3ab9cc0, the same commit that fixed this split for two other rules
+// and then reintroduced it in a third.
+if (CONSUMES_THEME) {
+  // Parity holds by construction: there is one copy of the tokens.
+} else {
+  const appTokens = parseTokens(readFileSync(APP_CSS, "utf8"));
+  const themeTokens = parseTokens(readFileSync(THEME, "utf8"));
+
+  for (const [name, themeValue] of themeTokens) {
+    if (!appTokens.has(name)) {
+      report("token-parity", APP_CSS, 0,
+        `"${name}" is in the vendored theme but missing from this app's :root — the siblings would get a token production does not have.`);
+    } else if (!sameValues(appTokens.get(name), themeValue)) {
+      report("token-parity", APP_CSS, 0,
+        `"${name}" is [${appTokens.get(name).join(", ")}] here and [${themeValue.join(", ")}] in the vendored theme — production and the siblings disagree.`);
+    }
+  }
+  for (const name of appTokens.keys()) {
+    if (!themeTokens.has(name) && !APP_ONLY_TOKENS.has(name)) {
+      report("token-parity", APP_CSS, 0,
+        `"${name}" is defined here but not in the vendored theme. Add it there, or declare it in APP_ONLY_TOKENS with a reason.`);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 function parseRules(css) {
   const rules = new Map();
@@ -138,11 +252,20 @@ const themeRules = parseRules(readFileSync(THEME, "utf8"));
 const appRules = parseRules(readFileSync(APP_CSS, "utf8"));
 const SHADOW_THRESHOLD = 3;
 
-for (const [appSelector, appDecls] of appRules) {
+for (const [appSelector, appDecls] of CONSUMES_THEME ? appRules : []) {
   for (const [themeSelector, themeDecls] of themeRules) {
     if (!themeSelector.startsWith(".km-")) continue;
     const shared = [...appDecls].filter((d) => themeDecls.has(d));
-    if (shared.length >= SHADOW_THRESHOLD) {
+    // Three shared declarations is a CSS idiom, not a copied primitive:
+    // `display:flex; align-items:center; gap` describes half the rules ever
+    // written. Require at least one DISTINCTIVE agreement — a token-valued
+    // declaration — so that borrowing a primitive's identity is what trips
+    // this, not agreeing with it about layout. Without this the Screener saw
+    // 33 findings, nearly all false, and the count grew when
+    // `.km-version-chip` gained a legitimate bound: a gate whose false
+    // positives increase as the theme improves is worse than no gate.
+    const distinctive = shared.some((d) => d.includes("var(--"));
+    if (shared.length >= SHADOW_THRESHOLD && distinctive) {
       report("shadowed-primitive", APP_CSS, 0,
         `"${appSelector}" repeats ${shared.length} declarations of the theme's "${themeSelector}". Use the primitive instead of re-implementing it.`);
     }
@@ -157,6 +280,39 @@ const primitives = [...themeRules.keys()]
   .flatMap((selector) => selector.split(",").map((s) => s.trim()))
   .filter((selector) => selector.startsWith(".km-"))
   .map((selector) => selector.replace(/^\./, "").split(/[\s:>[]/)[0]);
+// ---- rule: vendor-integrity ------------------------------------------
+// The check no sibling had. Everything else here asks "is this repo using the
+// theme correctly?"; this asks "is this repo using the REAL theme?" — a copy
+// edited in place passes every other rule while silently forking the design
+// system. It caught a stale copy in kapman-polygon-viewer within minutes of
+// kapman-tradelog@6d78e55 landing.
+if (!existsSync(THEME_SOURCE)) {
+  console.warn(
+    `WARN  vendor-integrity SKIPPED — theme source not found at ${THEME_SOURCE}. ` +
+      `Set KAPMAN_THEME_SOURCE to the authoring repo's design/ directory.`,
+  );
+} else if (resolve(VENDOR_DIR) !== resolve(THEME_SOURCE)) {
+  for (const file of VENDORED_FILES) {
+    const mine = join(VENDOR_DIR, file);
+    const theirs = join(THEME_SOURCE, file);
+    if (!existsSync(theirs)) {
+      console.warn(`WARN  vendor-integrity: ${file} absent upstream — cannot compare.`);
+      continue;
+    }
+    if (!existsSync(mine)) {
+      report("vendor-integrity", mine, 0,
+        `${file} is missing from the vendored theme directory.`);
+      continue;
+    }
+    if (readFileSync(mine, "utf8") !== readFileSync(theirs, "utf8")) {
+      report("vendor-integrity", mine, 0,
+        `differs from the source of truth. Decision 04: the copy is never ` +
+        `edited — land the change in the authoring repo's design/${file} on a ` +
+        `theme/<name> branch, merge, then re-vendor. (diff "${mine}" "${theirs}")`);
+    }
+  }
+}
+
 const available = new Set(primitives);
 const sourceText = walk(SRC).map((f) => readFileSync(f, "utf8")).join("\n");
 const used = new Set([...available].filter((name) => sourceText.includes(name)));
@@ -169,7 +325,11 @@ if (json) {
   for (const finding of findings) {
     console.log(`${finding.file}:${finding.line || "?"}  [${finding.rule}]  ${finding.message}`);
   }
-  console.log(`\nPrimitive coverage: ${used.size}/${available.size} theme primitives used.`);
+  console.log(
+    CONSUMES_THEME
+      ? `\nPrimitive coverage: ${used.size}/${available.size} theme primitives used.`
+      : `\nPrimitive coverage: n/a — this repo authors the theme rather than importing it.`,
+  );
   if (findings.length) {
     console.log(`\n${findings.length} finding(s): ${Object.entries(byRule).map(([r, n]) => `${r} ${n}`).join(", ")}`);
     console.log("Suppress a deliberate exception with a `design-lint-allow: <reason>` comment on or above the line.");

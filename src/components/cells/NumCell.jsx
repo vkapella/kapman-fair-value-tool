@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { numCommit } from "../../lib/cellSemantics.js";
 
 export default function NumCell({ value, onChange, decimals = 2, max, suffix = "", width = "w-20" }) {
   const [editing, setEditing] = useState(false);
@@ -6,14 +7,8 @@ export default function NumCell({ value, onChange, decimals = 2, max, suffix = "
   useEffect(() => { setDraft(value); }, [value]);
   const commit = () => {
     setEditing(false);
-    let n = parseFloat(draft);
-    if (isNaN(n)) n = 0;
-    if (max != null) n = Math.min(n, max);
-    if (n < 0) n = 0;
-    // No-op edits must not fire onChange: the EPS cell's handler pins the row
-    // and stamps the date, which a click-in/click-out must never do.
-    if (typeof value === "number" && n === value) return;
-    onChange(n);
+    const result = numCommit(draft, { value, max });
+    if (result.action !== "noop") onChange(result.value);
   };
   if (editing) {
     return (

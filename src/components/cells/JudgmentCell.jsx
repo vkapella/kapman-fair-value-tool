@@ -2,12 +2,14 @@
 // explicit "not assessed" state mapping to `null` — it must be the default
 // for any field with no stored manual value, never a pre-selected middle
 // option (that would silently record a judgment the operator never made).
+import { judgmentValue } from "../../lib/cellSemantics.js";
+
 export default function JudgmentCell({ field, manual, onChange }) {
   const assessed = manual != null;
   return (
     <select
       value={assessed ? manual : ""}
-      onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+      onChange={(e) => onChange(judgmentValue(e.target.value))}
       title={field.description}
       className={`bg-surface-3 border border-border px-1.5 py-1 text-xs rounded outline-none max-w-[11rem] ${
         assessed ? "text-text" : "text-text-3 italic"

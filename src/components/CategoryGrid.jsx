@@ -7,6 +7,7 @@ import EmptyTableRow from "./EmptyTableRow.jsx";
 import CategorySingleTicker from "./CategorySingleTicker.jsx";
 import { categoryFields, countUnassessed, fieldTitle, weightLabel, PIN_TITLE } from "../lib/categoryFields.js";
 import { formatFieldValue } from "../lib/format.js";
+import { categoryScorePatch, togglePinnedCategory } from "../lib/cellSemantics.js";
 
 // One editor per rubric category (Valuation / Growth / Moat / Execution Risk /
 // Economy), in two orientations (UI-4, decision 15):
@@ -37,11 +38,7 @@ export default function CategoryGrid({
   const colSpan = 1 + all.length + 3;
   const categoryName = def.label.replace(/\s*\/\d+$/, "");
 
-  const togglePin = (idx, current) => {
-    const pinned = new Set(current.pinnedCategories || []);
-    if (pinned.has(category)) pinned.delete(category); else pinned.add(category);
-    updateStock(idx, { pinnedCategories: Array.from(pinned) });
-  };
+  const togglePin = (idx, current) => updateStock(idx, togglePinnedCategory(current, category));
 
   return (
     <div className="rounded-lg border border-border overflow-hidden bg-surface">
@@ -135,10 +132,7 @@ export default function CategoryGrid({
                     <div className="flex items-center justify-end gap-1.5">
                       <NumCell
                         value={effective}
-                        onChange={(value) => updateStock(idx, {
-                          [category]: value,
-                          pinnedCategories: Array.from(new Set([...(r.pinnedCategories || []), category])),
-                        })}
+                        onChange={(value) => updateStock(idx, categoryScorePatch(r, category, value))}
                         decimals={0}
                         max={def.max}
                         width="w-12"

@@ -4,6 +4,7 @@ import JudgmentCell from "./cells/JudgmentCell.jsx";
 import NumCell from "./cells/NumCell.jsx";
 import { categoryFields, countUnassessed, fieldTitle, weightLabel, PIN_TITLE } from "../lib/categoryFields.js";
 import { formatFieldValue } from "../lib/format.js";
+import { categoryScorePatch, togglePinnedCategory } from "../lib/cellSemantics.js";
 
 // The single-ticker transpose (UI-4, decision 15): one ticker, factors down
 // the rows. This is the only orientation that reaches every factor at 390px
@@ -135,21 +136,14 @@ export default function CategorySingleTicker({
           )}
           <NumCell
             value={effective}
-            onChange={(value) => updateStock(idx, {
-              [category]: value,
-              pinnedCategories: Array.from(new Set([...(row.pinnedCategories || []), category])),
-            })}
+            onChange={(value) => updateStock(idx, categoryScorePatch(row, category, value))}
             decimals={0}
             max={def.max}
             width="w-12"
           />
           <span className="font-mono text-xs text-text-3">/ {def.max}</span>
           <button
-            onClick={() => {
-              const pinned = new Set(row.pinnedCategories || []);
-              if (pinned.has(category)) pinned.delete(category); else pinned.add(category);
-              updateStock(idx, { pinnedCategories: Array.from(pinned) });
-            }}
+            onClick={() => updateStock(idx, togglePinnedCategory(row, category))}
             aria-pressed={isPinned}
             aria-label={`Pin ${def.label.replace(/\s*\/\d+$/, "")} score for ${row.ticker}`}
             title={isPinned ? PIN_TITLE.pinned : PIN_TITLE.unpinned}

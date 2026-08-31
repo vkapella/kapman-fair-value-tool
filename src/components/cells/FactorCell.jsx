@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { formatFieldValue } from "../../lib/format.js";
+import { factorCommit, factorState } from "../../lib/cellSemantics.js";
 
 // Quantitative factor cell for the category maintenance grids. Unlike
 // NumCell (which always writes a plain number to a stock column), this cell
@@ -8,25 +9,14 @@ import { formatFieldValue } from "../../lib/format.js";
 // commit clears the override rather than zeroing it out.
 export default function FactorCell({ fetched, manual, format, onCommit, width = "w-24" }) {
   const [editing, setEditing] = useState(false);
-  const hasOverride = manual != null;
-  const effective = hasOverride ? manual : fetched;
+  const { hasOverride, effective } = factorState({ fetched, manual });
   const [draft, setDraft] = useState(effective ?? "");
   useEffect(() => { setDraft(effective ?? ""); }, [effective]);
 
   const commit = () => {
     setEditing(false);
-    const raw = typeof draft === "string" ? draft.trim() : draft;
-    if (raw === "" || raw == null) {
-      if (hasOverride) onCommit(null);
-      return;
-    }
-    if (format === "text") {
-      if (raw !== manual) onCommit(raw);
-      return;
-    }
-    const n = Number(raw);
-    if (!Number.isFinite(n)) return;
-    if (n !== manual) onCommit(n);
+    const result = factorCommit(draft, { manual, format });
+    if (result.action !== "noop") onCommit(result.value);
   };
 
   if (editing) {

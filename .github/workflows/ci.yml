@@ -33,3 +33,37 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # UI-8 (decision 13). Walks every audited view's rendered DOM and fails on
+  # any text node below 4.5:1 — measured against composited backgrounds, not
+  # token arithmetic, because two published ratios were wrong before a manual
+  # pass caught them. The self-test proves the gate itself can fail; a green
+  # run that never could is worth nothing.
+  contrast:
+    name: Contrast gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+
+      - name: Start server
+        env:
+          PORT: "8080"
+          SQLITE_DB_PATH: /tmp/contrast.sqlite
+        run: |
+          npm run start &
+          npx wait-on http://localhost:8080/api/version --timeout 60000 || \
+            (echo "server failed to start" && exit 1)
+
+      - name: Self-test — the gate must be able to fail
+        run: npm run check:contrast -- --self-test
+
+      - name: Contrast gate
+        run: npm run check:contrast -- --report

@@ -5,7 +5,7 @@ import SortHeader from "./SortHeader.jsx";
 import EmptyTableRow from "./EmptyTableRow.jsx";
 import Legend from "./Legend.jsx";
 import { RUBRIC_DEF } from "../lib/rubric.js";
-import { ivColor, scoreColor, fmtPctIV } from "../lib/format.js";
+import { ivColor, scoreColor, fmtPctIV, missingMarkerProps } from "../lib/format.js";
 
 const CATEGORY_COLUMNS = [
   "valuation",
@@ -26,6 +26,10 @@ function ScoreMarker({ isPinned }) {
     /* UI-C (decision 36): pin/model is a closed set, so the marker takes the
        set's step and the column keeps one edge instead of jittering. */
     <span
+      // Non-text marker at --text-4 (UI-0 step 5) — sanctioned, so the
+      // contrast gate allowlists it. Its meaning is carried by the word
+      // itself, not by the colour.
+      data-contrast-exempt=""
       className={`ml-1.5 inline-block min-w-chip-2 text-center text-[9px] uppercase font-mono ${isPinned ? "text-warn" : "text-text-4"}`}
       title={isPinned ? "Operator override is pinned" : "Live model score"}
     >
@@ -137,7 +141,7 @@ export default function ScoreCardTable({ rows, updateStock, removeStock, stocks,
                       )}
                     </div>
                   </td>
-                  <td className="px-2 py-2 text-right"><span className={`tabular-nums font-mono text-xs ${ivColor(r.pctIV)}`}>{fmtPctIV(r.pctIV)}</span></td>
+                  <td className="px-2 py-2 text-right"><span {...missingMarkerProps(r.pctIV)} className={`tabular-nums font-mono text-xs ${ivColor(r.pctIV)}`}>{fmtPctIV(r.pctIV)}</span></td>
                   {CATEGORY_COLUMNS.map((key) => {
                     const isPinned = (r.pinnedCategories || []).includes(key);
                     return (

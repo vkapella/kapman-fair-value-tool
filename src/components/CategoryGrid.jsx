@@ -72,12 +72,12 @@ export default function CategoryGrid({
               <SortHeader col="ticker" label="Ticker" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} align="left" />
               {[...derived, ...quantitative].map((field) => (
                 <th key={field.key} title={fieldTitle(category, field, all)} className="px-2 py-2 text-right text-[10px] uppercase tracking-wider font-medium text-text-3">
-                  {field.label}<span className="block text-[9px] text-text-4">{weightLabel(category, field, all)}</span>
+                  {field.label}<span data-contrast-exempt="" className="block text-[9px] text-text-4">{weightLabel(category, field, all)}</span>
                 </th>
               ))}
               {qualitative.map((field) => (
                 <th key={field.key} title={fieldTitle(category, field, all)} className="px-2 py-2 text-left text-[10px] uppercase tracking-wider font-medium text-text-3">
-                  {field.label}<span className="block text-[9px] text-text-4">{weightLabel(category, field, all)}</span>
+                  {field.label}<span data-contrast-exempt="" className="block text-[9px] text-text-4">{weightLabel(category, field, all)}</span>
                 </th>
               ))}
               <SortHeader col={category} label="Category Score" sortBy={sortBy} sortDir={sortDir} sortToggle={sortToggle} />
@@ -144,7 +144,7 @@ export default function CategoryGrid({
                         width="w-12"
                       />
                       {isPinned && comp != null && comp !== effective && (
-                        <span className="tabular-nums font-mono text-[10px] text-text-4">model {comp}</span>
+                        <span data-contrast-exempt="" className="tabular-nums font-mono text-[10px] text-text-4">model {comp}</span>
                       )}
                     </div>
                   </td>

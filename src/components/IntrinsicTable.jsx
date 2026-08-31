@@ -3,7 +3,7 @@ import NumCell from "./cells/NumCell.jsx";
 import TextCell from "./cells/TextCell.jsx";
 import SortHeader from "./SortHeader.jsx";
 import EmptyTableRow from "./EmptyTableRow.jsx";
-import { fmtMoney, ivColor, ivBg, fmtPctIV } from "../lib/format.js";
+import { fmtMoney, ivColor, ivBg, fmtPctIV, missingMarkerProps } from "../lib/format.js";
 
 const formatEps = (value) => (typeof value === "number" ? value.toFixed(2) : "—");
 
@@ -16,6 +16,7 @@ function SourceEps({ value, label, onChoose, source, timestamp, unavailableReaso
   const unavailable = value == null;
   return (
     <button
+      {...missingMarkerProps(value)}
       disabled={unavailable}
       onClick={onChoose}
       title={unavailable ? unavailableReason || `${label} is unavailable` : `Use ${label} for valuation`}
@@ -31,7 +32,7 @@ function SourceEps({ value, label, onChoose, source, timestamp, unavailableReaso
 function GrowthSuggestion({ row, onChoose }) {
   const recommendation = row.growthRecommendation;
   if (!recommendation || recommendation.value == null) {
-    return <span className="text-text-4 font-mono text-xs" title={recommendation?.warning || "Refresh provider data to calculate a suggestion"}>—</span>;
+    return <span data-contrast-exempt="" className="text-text-4 font-mono text-xs" title={recommendation?.warning || "Refresh provider data to calculate a suggestion"}>—</span>;
   }
   const delta = recommendation.value - row.growth;
   const material = Math.abs(delta) >= 3;
@@ -111,7 +112,7 @@ export default function IntrinsicTable({ rows, updateStock, removeStock, stocks,
                 <td className="px-2 py-2 text-right"><GrowthSuggestion row={r} onChoose={() => updateStock(idx, { growth: r.growthRecommendation.value })} /></td>
                 <td className="px-2 py-2 text-right tabular-nums font-mono text-xs text-text">{fmtMoney(r.iv)}</td>
                 <td className="px-2 py-2 text-right"><NumCell value={r.currentPrice} onChange={(v) => updateStock(idx, { currentPrice: v })} decimals={2} width="w-24" /></td>
-                <td className="px-2 py-2 text-right"><span className={`inline-block px-2 py-0.5 rounded border tabular-nums font-mono text-xs ${ivBg(r.pctIV)} ${ivColor(r.pctIV)}`}>{fmtPctIV(r.pctIV)}</span></td>
+                <td className="px-2 py-2 text-right"><span {...missingMarkerProps(r.pctIV)} className={`inline-block px-2 py-0.5 rounded border tabular-nums font-mono text-xs ${ivBg(r.pctIV)} ${ivColor(r.pctIV)}`}>{fmtPctIV(r.pctIV)}</span></td>
                 <td className="px-2 py-2 text-text-3 font-mono text-xs"><TextCell value={r.updated} onChange={(v) => updateStock(idx, { updated: v })} width="w-16" /></td>
               </tr>;
             })}

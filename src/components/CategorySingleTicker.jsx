@@ -112,7 +112,7 @@ export default function CategorySingleTicker({
           >
             <div className="min-w-0">
               <div className="text-xs text-text-2" title={fieldTitle(category, field, all)}>{field.label}</div>
-              <div className="text-[9px] uppercase tracking-wider font-mono text-text-4">
+              <div data-contrast-exempt="" className="text-[9px] uppercase tracking-wider font-mono text-text-4">
                 {derived.includes(field) ? "derived · " : qualitative.includes(field) ? "judgment · " : "fetched · "}
                 {weightLabel(category, field, all)}
               </div>
@@ -131,7 +131,7 @@ export default function CategorySingleTicker({
           : <span className="font-mono text-[10px] text-pos">assessed</span>}
         <div className="ml-auto flex items-center gap-2">
           {isPinned && comp != null && comp !== effective && (
-            <span className="tabular-nums font-mono text-[10px] text-text-4">model {comp}</span>
+            <span data-contrast-exempt="" className="tabular-nums font-mono text-[10px] text-text-4">model {comp}</span>
           )}
           <NumCell
             value={effective}

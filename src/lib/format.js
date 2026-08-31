@@ -22,6 +22,20 @@ export const scoreColor = (s) =>
   : s >= 75 ? "bg-accent text-bg"
   : s >= 65 ? "bg-warn text-bg" : "bg-surface-3 text-text-3";
 
+// An em dash means "no value in force". That is a disabled marker, not prose,
+// and the shared theme sanctions it at --text-4 (.km-cell--missing: "em dash;
+// scores neutral 55%, not zero"). Spread this onto the node that renders one
+// so the contrast gate allowlists exactly those — prose at --text-4 still
+// fails, which is the distinction UI-0 step 5 draws.
+export const missingMarkerProps = (value) => (value == null ? { "data-contrast-exempt": "" } : {});
+
+// A disabled control's label sits at --text-4 per UI-0 step 5, and WCAG 1.4.3
+// excludes inactive components from the contrast minimum. Applied only while
+// the control is actually disabled, so the enabled state stays gated.
+// (Flagged upstream: "never prose" and this enumeration disagree on whether a
+// disabled *label* is a marker.)
+export const disabledMarkerProps = (isDisabled) => (isDisabled ? { "data-contrast-exempt": "" } : {});
+
 export function formatFieldValue(value, format) {
   if (value == null || value === "") return "—";
   if (format === "percent" && typeof value === "number") return `${(value * 100).toFixed(2)}%`;

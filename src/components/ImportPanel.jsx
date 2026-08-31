@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, ListPlus } from "lucide-react";
 import { apiRequest } from "../lib/api.js";
-import { disabledMarkerProps } from "../lib/format.js";
 
 function parseTickers(value) {
   return [...new Set(
@@ -117,9 +116,8 @@ export default function ImportPanel({ onImported }) {
         <div className="mt-2 flex items-center gap-3">
           <button
             onClick={handlePreview}
-            {...disabledMarkerProps(tickers.length === 0 || loading)}
             disabled={tickers.length === 0 || loading}
-            className="px-4 py-2 rounded bg-accent hover:brightness-105 disabled:bg-surface-3 disabled:text-text-4 disabled:cursor-not-allowed text-bg text-xs font-medium transition flex items-center gap-2"
+            className="px-4 py-2 rounded bg-accent hover:brightness-105 disabled:bg-surface-3 disabled:text-text-3 disabled:cursor-not-allowed text-bg text-xs font-medium transition flex items-center gap-2"
           >
             {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ListPlus className="w-3.5 h-3.5" />}
             Preview {tickers.length || ""} ticker{tickers.length === 1 ? "" : "s"}
@@ -210,9 +208,8 @@ export default function ImportPanel({ onImported }) {
           <div className="border-t border-border px-4 py-3 flex items-center gap-3 bg-surface-2">
             <button
               onClick={handleApply}
-              {...disabledMarkerProps(selected.length === 0 || applying)}
               disabled={selected.length === 0 || applying}
-              className="px-4 py-2 rounded bg-accent hover:brightness-105 disabled:bg-surface-3 disabled:text-text-4 disabled:cursor-not-allowed text-bg text-xs font-medium transition flex items-center gap-2"
+              className="px-4 py-2 rounded bg-accent hover:brightness-105 disabled:bg-surface-3 disabled:text-text-3 disabled:cursor-not-allowed text-bg text-xs font-medium transition flex items-center gap-2"
             >
               {applying && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Add {selected.length} ticker{selected.length === 1 ? "" : "s"}

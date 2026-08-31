@@ -113,7 +113,7 @@ export default function CategorySingleTicker({
           >
             <div className="min-w-0">
               <div className="text-xs text-text-2" title={fieldTitle(category, field, all)}>{field.label}</div>
-              <div data-contrast-exempt="" className="text-[9px] uppercase tracking-wider font-mono text-text-4">
+              <div className="text-[9px] uppercase tracking-wider font-mono text-text-3">
                 {derived.includes(field) ? "derived · " : qualitative.includes(field) ? "judgment · " : "fetched · "}
                 {weightLabel(category, field, all)}
               </div>

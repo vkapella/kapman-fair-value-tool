@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 // Design-system lint (handoff 260830).
 //
-// Authored here, adopted by kapman-tradelog, improved there, and copied back
-// verbatim except for paths (kapman-tradelog@2336389). Tradelog owns the
-// shared theme, so the shared tooling now lives alongside it and travels the
-// same way the CSS does — including the vendor-integrity rule, which this
-// copy did not previously carry.
+// Authored in kapman-fair-value-tool and adopted here verbatim except for
+// paths. Tradelog owns the shared theme, so this now lives alongside it as
+// shared tooling: the Screener copies it from here the way it copies the CSS.
 //
 // Why this exists: the Screener shipped a hand-rolled equivalent of the shared
 // theme — one `km-` usage against 43 available primitives — and nothing caught
@@ -25,10 +23,17 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const SRC = join(ROOT, "src");
-// This repo CONSUMES the theme: its copy lives in src/design/ and its own
-// token block is src/index.css.
-const THEME = join(SRC, "design", "kapman-ui.css");
+// SRC and APP_CSS describe the APP BEING LINTED, which is not always this
+// repo: a consuming sibling runs this script from its own root against our
+// path. While these derived from the script's own location, CONSUMES_THEME
+// below was computed over Tradelog's source no matter who ran it — so a
+// consumer got `No design-system findings` for a repo the tool never opened.
+// The fourth silent success this programme has paid for. Screener, 2026-08-31.
+const SRC = process.env.KAPMAN_APP_SRC
+  ? resolve(process.env.KAPMAN_APP_SRC)
+  : join(ROOT, "src");
+// Tradelog owns the theme, so the source of truth is design/ at the repo root
+// and the app's own token block is src/app/globals.css.
 // Vendor integrity (decision 04: "copy VERBATIM ... do not edit the copies").
 // A consuming repo holds its copy under VENDOR_DIR and must match the source
 // of truth byte for byte. THEME_SOURCE points at the authoring repo's design/;
@@ -37,50 +42,163 @@ const THEME = join(SRC, "design", "kapman-ui.css");
 // source, so the rule is a self-comparison and trivially passes.
 const VENDOR_DIR = process.env.KAPMAN_VENDOR_DIR
   ? resolve(process.env.KAPMAN_VENDOR_DIR)
-  : join(SRC, "design");
+  : join(ROOT, "design");
 const THEME_SOURCE = process.env.KAPMAN_THEME_SOURCE
   ? resolve(process.env.KAPMAN_THEME_SOURCE)
-  : join(ROOT, "..", "kapman-tradelog", "design");
+  : join(ROOT, "design");
 const VENDORED_FILES = ["kapman-ui.css", "kapman-grid.css"];
-const APP_CSS = join(SRC, "index.css");
+// Lint against the theme THIS repo actually ships. In the authoring repo
+// VENDOR_DIR defaults to design/, so this is the same file it always was; in a
+// consumer it reads their vendored copy rather than ours, which matters the
+// moment a consumer is stale.
+const THEME = join(VENDOR_DIR, "kapman-ui.css");
+const APP_CSS = process.env.KAPMAN_APP_CSS
+  ? resolve(process.env.KAPMAN_APP_CSS)
+  : join(SRC, "app", "globals.css");
+
+// Missing app source: HARD FAIL when the path was explicitly configured — a
+// wrong KAPMAN_APP_SRC must never read as a clean run — but warn and skip on
+// defaults, which is a consumer with no app CSS of its own, or CI without the
+// sibling checked out. Same split vendor-integrity uses for a missing theme
+// source; a uniform hard fail would break a legitimate configuration.
+function missingAppSource(label, path, envVar) {
+  if (process.env[envVar]) {
+    console.error(
+      `ERROR ${label} not found at ${path} — ${envVar} is set, so this is a ` +
+        `configuration error, not an absent optional file. Fix the path.`,
+    );
+    process.exit(2);
+  }
+  console.warn(
+    `WARN  ${label} not found at ${path}. Source rules SKIPPED, not passed — ` +
+      `set ${envVar} to the app you mean to lint.`,
+  );
+  return false;
+}
+// The trap that produced the original report: pointing VENDOR_DIR at another
+// repo while leaving the app source defaulted means the flags below are
+// evaluated over THIS repo and the summary describes a repo nobody asked
+// about. Legitimate for a vendor-integrity-only drift check, so it warns
+// rather than fails — but it must say so, because the summary line alone
+// reads as a clean bill of health.
+if (process.env.KAPMAN_VENDOR_DIR && !process.env.KAPMAN_APP_SRC
+    && resolve(VENDOR_DIR) !== resolve(join(ROOT, "design"))) {
+  console.warn(
+    `WARN  KAPMAN_VENDOR_DIR points at ${VENDOR_DIR} but KAPMAN_APP_SRC is unset, ` +
+      `so the source rules read ${SRC} — this script's own repo, not the vendored one. ` +
+      `Set KAPMAN_APP_SRC/KAPMAN_APP_CSS, or ignore this if you meant a vendor-integrity-only check.`,
+  );
+}
+
+const SRC_OK = existsSync(SRC) || missingAppSource("app source", SRC, "KAPMAN_APP_SRC");
+const APP_CSS_OK = existsSync(APP_CSS) || missingAppSource("app CSS", APP_CSS, "KAPMAN_APP_CSS");
 
 const findings = [];
 const report = (rule, file, line, message) =>
   findings.push({ rule, file: relative(ROOT, file), line, message });
 
+// .css is collected as well as the script extensions. Without it no
+// stylesheet was ever colour-scanned: this repo keeps its colours in Tailwind
+// class strings inside TSX, which walk() already reached, so the gap was
+// invisible from the authoring side — while a plain-CSS consumer keeps them in
+// a stylesheet that nothing read. Two raw hexes sat unreported in the
+// Screener's styles.css until it grepped for them. Screener, 2026-09-01.
+//
+// The vendored theme is skipped by RESOLVED PATH, not by the directory name:
+// the name only happened to match because both siblings call it design/.
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) {
+      if (resolve(full) === resolve(VENDOR_DIR)) continue; // not ours to lint
       if (entry === "design") continue; // the vendored theme is not ours to lint
       if (entry === "node_modules" || entry === "__tests__") continue;
       walk(full, out);
-    } else if ([".jsx", ".js", ".tsx", ".ts"].includes(extname(entry)) && !entry.includes(".test.")) {
+    } else if (
+      [".jsx", ".js", ".tsx", ".ts", ".css"].includes(extname(entry)) &&
+      !entry.includes(".test.")
+    ) {
       out.push(full);
     }
   }
   return out;
 }
 
+// Walk once, and only if the source is actually there.
+const SRC_FILES = SRC_OK ? walk(SRC) : [];
+const APP_CSS_TEXT = APP_CSS_OK ? readFileSync(APP_CSS, "utf8") : "";
+
+// Does this repo CONSUME the vendored theme, or AUTHOR it? FOUR rules depend
+// on the answer — raw-color, shadowed-primitive, token parity and coverage —
+// because a consuming app has no :root and no reason to restate a primitive,
+// while the authoring app has both by definition. Computed here, before the
+// first rule that reads it, rather than beside the rules that used to.
+const CONSUMES_THEME = /@import[^;]*kapman-ui\.css|kapman-ui\.css["']/.test(
+  APP_CSS_TEXT + SRC_FILES.map((f) => readFileSync(f, "utf8")).join("\n"),
+);
+
+// Comment text, with block state tracked across lines. Used for two things:
+// keeping a documented colour out of raw-color, and deciding what is prose
+// when walking back to a suppression marker. The `://` guard keeps a URL from
+// truncating its own line.
+function stripComments(lines) {
+  let inBlock = false;
+  return lines.map((line) => {
+    let out = "";
+    for (let i = 0; i < line.length; i += 1) {
+      if (inBlock) {
+        if (line.startsWith("*/", i)) {
+          inBlock = false;
+          i += 1;
+        }
+        continue;
+      }
+      if (line.startsWith("/*", i)) {
+        inBlock = true;
+        i += 1;
+        continue;
+      }
+      if (line.startsWith("//", i) && line[i - 1] !== ":") break;
+      out += line[i];
+    }
+    return out;
+  });
+}
+
 const MARKER = /design-lint-allow:\s*\S/;
 const CODE_BOUNDARY = /[;{}]/;
 const MAX_COMMENT_LINES = 6;
+
+const strippedCache = new WeakMap();
+function codeOnly(lines) {
+  let cached = strippedCache.get(lines);
+  if (!cached) {
+    cached = stripComments(lines);
+    strippedCache.set(lines, cached);
+  }
+  return cached;
+}
 
 // A suppression covers its own line, or attaches to the comment block directly
 // above it — so a reason long enough to be worth reading can wrap across
 // lines. Walking back stops at the previous statement, which keeps a marker
 // from silently covering code further down the file.
-const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/;
-
 function allowed(lines, index) {
   if (MARKER.test(lines[index])) return true;
+  const code = codeOnly(lines);
   for (let i = index - 1; i >= 0 && index - i <= MAX_COMMENT_LINES; i -= 1) {
     if (MARKER.test(lines[i])) return true;
-    // Only real code ends the walk-back. Prose inside a comment routinely
-    // contains a semicolon, and treating that as a statement boundary made a
-    // multi-line reason silently fail to suppress — the worst failure mode
-    // for a tool whose whole value is being trusted.
-    if (!COMMENT_LINE.test(lines[i]) && CODE_BOUNDARY.test(lines[i])) break;
+    // Only real CODE ends the walk-back, decided by stripping comments rather
+    // than by how the line begins. A previous fix tested for a `//`, `/*` or
+    // `*` prefix, which is the JSDoc shape — but a CSS block comment's
+    // continuation lines are bare prose, so a reason containing a semicolon
+    // read as a statement boundary and the marker above it was never reached.
+    // The Screener's `.fb-badge` suppression ("...that amendment; taking a
+    // local substitute...") silently did not suppress, while its `.fl-hit-yes`
+    // one did, purely because that prose had no semicolon. Screener,
+    // 2026-09-01. A tool that silently ignores a written exemption is the one
+    // failure this programme cannot afford.
+    if (CODE_BOUNDARY.test(code[i])) break;
   }
   return false;
 }
@@ -99,7 +217,7 @@ const ESCAPE_RE = /\[(?:color|background|background-color|border-color|fill|stro
 const Z_RE = /\bz-\[?(\d+)\]?\b/g;
 const SANCTIONED_Z = new Set(["0", "10", "20", "30", "40", "42", "60", "61", "70", "71", "80"]);
 
-for (const file of walk(SRC)) {
+for (const file of SRC_FILES) {
   const lines = readFileSync(file, "utf8").split("\n");
   lines.forEach((text, i) => {
     if (allowed(lines, i)) return;
@@ -132,13 +250,21 @@ for (const file of walk(SRC)) {
 // noise for; none of the three apps uses one.
 // ---------------------------------------------------------------------------
 const COLOR_RE = /#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?\b|\brgba?\(|\bhsla?\(|\boklch\(/g;
-// APP_CSS is the app's :root — the token definitions themselves. Linting it
-// for raw colour asks the source of truth to look itself up.
-for (const file of walk(SRC).filter((f) => f !== APP_CSS)) {
+
+// APP_CSS means two different files depending on who is running. In the
+// AUTHORING repo it is the token definitions — linting it for raw colour asks
+// the source of truth to look itself up, so it stays exempt. In a CONSUMER it
+// is just the app stylesheet, with no :root of its own, and exempting it hid
+// real colours. Same authoring-vs-consuming split the other rules already make.
+const colourScanExempt = (f) => !CONSUMES_THEME && f === APP_CSS;
+for (const file of SRC_FILES.filter((f) => !colourScanExempt(f))) {
   const lines = readFileSync(file, "utf8").split("\n");
+  // Raw lines for allowed() — it reads comments to find the suppression
+  // marker — and comment-stripped lines for matching.
+  const code = stripComments(lines);
   lines.forEach((text, i) => {
     if (allowed(lines, i)) return;
-    for (const match of text.matchAll(COLOR_RE)) {
+    for (const match of code[i].matchAll(COLOR_RE)) {
       report("raw-color", file, i + 1,
         `raw colour "${match[0]}" — use a token from the shared theme, or mark the line with design-lint-allow and a reason.`);
     }
@@ -154,13 +280,6 @@ for (const file of walk(SRC).filter((f) => f !== APP_CSS)) {
 // and had its own `body` reported as a hand-rolled `.km-btn`. Those were
 // false signals, not findings. Gate both on whether the app actually imports
 // the theme.
-// Does this repo CONSUME the vendored theme, or AUTHOR it? Three rules depend
-// on the answer — shadowed-primitive, token parity, and the coverage count —
-// because a consuming app has no :root and no reason to restate a primitive,
-// while the authoring app has both by definition.
-const CONSUMES_THEME = /@import[^;]*kapman-ui\.css|kapman-ui\.css["']/.test(
-  readFileSync(APP_CSS, "utf8") + walk(SRC).map((f) => readFileSync(f, "utf8")).join("\n"),
-);
 
 // ---------------------------------------------------------------------------
 // Rule 6 — token parity between the app's :root and the vendored theme.
@@ -206,10 +325,14 @@ const sameValues = (a, b) => a.length === b.length && a.every((v, i) => v === b[
 // is precisely the drift the rule exists to prevent. Reported by the Screener
 // against 3ab9cc0, the same commit that fixed this split for two other rules
 // and then reintroduced it in a third.
-if (CONSUMES_THEME) {
+if (!APP_CSS_OK) {
+  // Already warned above. Skipping is the point — reporting every theme token
+  // as "missing from the app" against a file that does not exist is the same
+  // false-clean failure in the other direction.
+} else if (CONSUMES_THEME) {
   // Parity holds by construction: there is one copy of the tokens.
 } else {
-  const appTokens = parseTokens(readFileSync(APP_CSS, "utf8"));
+  const appTokens = parseTokens(APP_CSS_TEXT);
   const themeTokens = parseTokens(readFileSync(THEME, "utf8"));
 
   for (const [name, themeValue] of themeTokens) {
@@ -249,25 +372,46 @@ function parseRules(css) {
 }
 
 const themeRules = parseRules(readFileSync(THEME, "utf8"));
-const appRules = parseRules(readFileSync(APP_CSS, "utf8"));
-const SHADOW_THRESHOLD = 3;
+const appRules = parseRules(APP_CSS_TEXT);
+// Score by COVERAGE OF THE PRIMITIVE, not by an absolute count of shared
+// declarations. An absolute count cannot tell a copy from an idiom —
+// `display:flex; align-items:center; gap` describes half the rules ever
+// written — and it had a failure property that got worse as the theme got
+// better: adding a declaration to a primitive can only ever ADD matches, so
+// `.km-version-chip` gaining a legitimate 13ch bound manufactured new
+// findings. Requiring one token-valued agreement (the first attempt at a fix)
+// took the Screener 33 -> 22 but kept its named false positives, because
+// border and radius are token-valued in every rule in the system.
+//
+// A ratio inverts that: unshared declarations grow the denominator, so
+// enriching a primitive LOWERS the scores against it. The Screener's
+// `.pb-col` case goes 3/11 -> 4/14 (27% -> 29%) and stays filtered. Measured
+// on its styles.css this rule reports 2 where the previous one reported 22,
+// and both survivors were worth reading.
+//
+// KNOWN BIAS, stated because this programme keeps paying for undocumented
+// tool properties: coverage-of-primitive favours SMALL primitives.
+// `.km-btn--primary` has 4 declarations, so 3 shared trips at 75%;
+// `.km-btn` has ~14, so a genuine copy needs 7. Expect over-flagging of
+// modifiers and under-flagging of copies of the big primitives. It is why the
+// Screener's `.fb-btn` surfaced against `.km-pin` and not against `.km-btn` —
+// the primitive it should actually adopt.
+const SHADOW_MIN_SHARED = 3;
+const SHADOW_MIN_COVERAGE = 0.5;
 
 for (const [appSelector, appDecls] of CONSUMES_THEME ? appRules : []) {
   for (const [themeSelector, themeDecls] of themeRules) {
     if (!themeSelector.startsWith(".km-")) continue;
     const shared = [...appDecls].filter((d) => themeDecls.has(d));
-    // Three shared declarations is a CSS idiom, not a copied primitive:
-    // `display:flex; align-items:center; gap` describes half the rules ever
-    // written. Require at least one DISTINCTIVE agreement — a token-valued
-    // declaration — so that borrowing a primitive's identity is what trips
-    // this, not agreeing with it about layout. Without this the Screener saw
-    // 33 findings, nearly all false, and the count grew when
-    // `.km-version-chip` gained a legitimate bound: a gate whose false
-    // positives increase as the theme improves is worse than no gate.
-    const distinctive = shared.some((d) => d.includes("var(--"));
-    if (shared.length >= SHADOW_THRESHOLD && distinctive) {
+    const coverage = shared.length / themeDecls.size;
+    if (shared.length >= SHADOW_MIN_SHARED && coverage >= SHADOW_MIN_COVERAGE) {
+      // Worded as a LEAD, not a verdict. Both of the Screener's survivors were
+      // true findings under the wrong name: one was a third site for an
+      // untokenised pairing, the other an adoption gap against a different
+      // primitive than the one named. "Use the primitive instead of
+      // re-implementing it" would have had both actioned wrongly.
       report("shadowed-primitive", APP_CSS, 0,
-        `"${appSelector}" repeats ${shared.length} declarations of the theme's "${themeSelector}". Use the primitive instead of re-implementing it.`);
+        `"${appSelector}" shares ${shared.length} of "${themeSelector}"'s ${themeDecls.size} declarations (${Math.round(coverage * 100)}%) — its closest match in the theme. Worth checking whether it should adopt a primitive, or whether the theme is missing one.`);
     }
   }
 }
@@ -314,7 +458,7 @@ if (!existsSync(THEME_SOURCE)) {
 }
 
 const available = new Set(primitives);
-const sourceText = walk(SRC).map((f) => readFileSync(f, "utf8")).join("\n");
+const sourceText = SRC_FILES.map((f) => readFileSync(f, "utf8")).join("\n");
 const used = new Set([...available].filter((name) => sourceText.includes(name)));
 
 const json = process.argv.includes("--json");
@@ -325,10 +469,24 @@ if (json) {
   for (const finding of findings) {
     console.log(`${finding.file}:${finding.line || "?"}  [${finding.rule}]  ${finding.message}`);
   }
+  // Name the source that was actually linted. Four times now this programme
+  // has read a clean summary for a repo the tool never opened; a run that
+  // states its own inputs cannot do that silently.
+  // Relative when it is genuinely shorter, absolute otherwise — a path that
+  // climbs out of cwd is less readable than the real one, and this line only
+  // works if it is read.
+  const shortPath = (path) => {
+    const rel = relative(process.cwd(), path);
+    return rel && !rel.startsWith("..") ? rel : path;
+  };
+  console.log(
+    `\nLinted: ${shortPath(SRC)}${APP_CSS_OK ? `, ${shortPath(APP_CSS)}` : " (no app CSS)"} ` +
+      `against ${shortPath(THEME)}`,
+  );
   console.log(
     CONSUMES_THEME
-      ? `\nPrimitive coverage: ${used.size}/${available.size} theme primitives used.`
-      : `\nPrimitive coverage: n/a — this repo authors the theme rather than importing it.`,
+      ? `Primitive coverage: ${used.size}/${available.size} theme primitives used.`
+      : `Primitive coverage: n/a — this repo authors the theme rather than importing it.`,
   );
   if (findings.length) {
     console.log(`\n${findings.length} finding(s): ${Object.entries(byRule).map(([r, n]) => `${r} ${n}`).join(", ")}`);

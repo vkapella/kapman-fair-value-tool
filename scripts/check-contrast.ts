@@ -282,6 +282,25 @@ async function main() {
   }
 
   console.log(`\nTotal: ${totalChecked} text nodes checked, ${totalSkipped} skipped (background-image/unresolvable).`);
+
+  // Decision 56 / Amendment 03 §7: "a gate that measured nothing has failed."
+  // The self-test above proves the gate CAN fail; this proves it actually
+  // looked at something. A gate that passes because it measured nothing is
+  // worse than no gate — it reports green for a server that never rendered, a
+  // view set that stopped resolving, or a walker that silently threw. Any real
+  // page here has hundreds of text nodes, so a near-zero count is a broken run
+  // rather than a clean one. This runs in CI on every push to main, and a push
+  // to main is a production release.
+  const MIN_EXPECTED_NODES = 100;
+  if (totalChecked < MIN_EXPECTED_NODES) {
+    console.error(
+      `\nCONTRAST GATE INCONCLUSIVE — only ${totalChecked} text nodes checked across ${VIEWS.length} views ` +
+        `(expected at least ${MIN_EXPECTED_NODES}). The pages did not render: check that the server is serving ` +
+        `built content and that the views still resolve. Refusing to report a pass on an empty measurement.`,
+    );
+    process.exit(1);
+  }
+
   if (allFindings.length > 0) {
     console.error(`\nCONTRAST GATE FAILED — ${allFindings.length} text node(s) below ${MIN_RATIO}:1\n`);
     for (const finding of allFindings.slice(0, 50)) {

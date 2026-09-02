@@ -11,19 +11,26 @@ import "ag-grid-community/styles/ag-theme-quartz.css";
 /** Row height comes from the tokens, not a literal: --row-h at pointer widths
  *  and --row-h-touch below, so UI-7's decision stays in one place. AG Grid
  *  virtualises on a JS number, so the token has to be read rather than
- *  inherited through CSS. */
+ *  inherited through CSS.
+ *
+ *  The query below MIRRORS kapman-grid.css by hand — the virtualiser's row
+ *  height and the CSS min-height have to agree, and nothing enforces that but
+ *  this comment. Ruling 57 moved both to (max-width: 1023.98px) so the 768–1024
+ *  rail band gets touch rows: a coarse-pointer iPad in that band was measuring
+ *  30px here against 44px in Tradelog. If the vendored file's media query moves
+ *  again, both matchMedia strings move with it in the same commit. */
 function useTokenRowHeight() {
   const read = () => {
     if (typeof window === "undefined") return 30;
     const styles = getComputedStyle(document.documentElement);
-    const touch = window.matchMedia("(pointer: coarse) and (max-width: 767px)").matches;
+    const touch = window.matchMedia("(pointer: coarse) and (max-width: 1023.98px)").matches;
     const raw = styles.getPropertyValue(touch ? "--row-h-touch" : "--row-h").trim();
     return parseInt(raw, 10) || (touch ? 44 : 30);
   };
 
   const [height, setHeight] = useState(read);
   useEffect(() => {
-    const query = window.matchMedia("(pointer: coarse) and (max-width: 767px)");
+    const query = window.matchMedia("(pointer: coarse) and (max-width: 1023.98px)");
     const update = () => setHeight(read());
     query.addEventListener("change", update);
     window.addEventListener("resize", update);

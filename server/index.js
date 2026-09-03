@@ -12,6 +12,7 @@ import { fetchFundamentalsBatch, finnhubConfigured } from "./lib/finnhub.js";
 import { computeScores, coerceFactorValue } from "./lib/scoring.js";
 import { buildTickerPreview } from "./lib/import.js";
 import { selectAutomaticValuationEps } from "./lib/eps.js";
+import { healthPayload } from "./lib/health.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -745,6 +746,34 @@ app.get("/api/version", (req, res) => {
     deploymentId: imageTag || process.env.FLY_MACHINE_ID || null,
   });
 });
+
+// Health (#47). This has to actually query the database, because the failure
+// it exists to catch is precisely the one a static response cannot see: the
+// process is up and serving the built SPA while SQLite is unreachable and
+// every /api/* route 500s. The app renders "Unable to load saved data" in
+// that state, so a check that only proves the process is listening reports
+// healthy for an app that is useless.
+//
+// Same contract as Tradelog's src/app/api/health/route.ts so the three apps
+// answer the same question the same way: 200 ok/connected, 503
+// degraded/disconnected, release identity alongside.
+//
+// /health and /healthz are aliases registered BEFORE the SPA fallback. They
+// are the paths a monitor or load balancer reaches for by convention, and
+// until #47 both fell through to index.html and returned 200 with HTML for
+// any request — a health check that could not fail.
+const healthHandler = (req, res) => {
+  const { status, body } = healthPayload(db, {
+    version: GIT_SHA ? GIT_SHA.slice(0, 7) : null,
+    sha: GIT_SHA,
+    machineId: process.env.FLY_MACHINE_ID || null,
+  });
+  res.status(status).json(body);
+};
+
+app.get("/api/health", healthHandler);
+app.get("/health", healthHandler);
+app.get("/healthz", healthHandler);
 
 app.get("/api/data", handleRoute((req, res) => {
   const stocks = getStocks();

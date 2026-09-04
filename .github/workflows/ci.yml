@@ -1,6 +1,18 @@
-# Validation gate. A push to main is a production release (see AGENTS.md), so
-# these run before the deploy workflow's own trigger fires — and on pull
-# requests, where a design-system regression is cheapest to fix.
+# Validation gate AND the release pipeline. A push to main is a production
+# release (see AGENTS.md), so the deploy job below is gated on both validation
+# jobs with `needs:` — a failing lint, test, build or contrast run means the
+# deploy never starts.
+#
+# It did not used to be. Until #46 the deploy lived in its own workflow with
+# its own `on: push` trigger, so GitHub started both at the same instant and
+# nothing made the deploy wait: a red CI run sat next to a successful
+# production deploy of the same broken commit. The header here claimed CI ran
+# "before the deploy workflow's own trigger fires", which was never what the
+# configuration did. Deploying from inside this workflow is what makes the
+# claim true.
+#
+# fly-deploy.yml still exists for manual releases (workflow_dispatch only) —
+# the deliberate escape hatch for when someone means to bypass the gate.
 name: CI
 
 on:
@@ -72,3 +84,40 @@ jobs:
 
       - name: Contrast gate
         run: npm run check:contrast -- --report
+
+  # The release (#46). `needs:` is the whole fix: this job cannot start until
+  # both validation jobs have succeeded, so a red run stops the release instead
+  # of racing it.
+  #
+  # Only on a push to main — a PR builds and validates but must never deploy,
+  # and this workflow also answers to pull_request and workflow_dispatch.
+  deploy:
+    name: Deploy to Fly.io
+    needs: [validate, contrast]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    # One deploy at a time; a queued push waits rather than racing the machine.
+    # Shares a group with fly-deploy.yml's manual job so a hand-run release and
+    # an automatic one cannot overlap.
+    concurrency:
+      group: fly-deploy
+      cancel-in-progress: false
+    steps:
+      # Token policy: FLY_API_TOKEN must be a DEPLOY-scoped, PER-APP token —
+      # `fly tokens create deploy -a kapman-fair-value-tool` — never an
+      # org-wide token, so this repo's CI can never touch the other kapman
+      # Fly apps.
+      - name: Skip — FLY_API_TOKEN secret not set
+        if: env.FLY_API_TOKEN == ''
+        run: echo "FLY_API_TOKEN is not configured; skipping deploy (see AGENTS.md Deployment to Fly)."
+      - uses: actions/checkout@v4
+        if: env.FLY_API_TOKEN != ''
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        if: env.FLY_API_TOKEN != ''
+      - name: fly deploy
+        if: env.FLY_API_TOKEN != ''
+        # GIT_SHA feeds GET /api/version so the header chip carries the
+        # release SHA (UI-1, handoff 260830).
+        run: flyctl deploy --remote-only --build-arg GIT_SHA=${{ github.sha }}

@@ -1,5 +1,15 @@
-# Auto-deploy to Fly on push to main (#42). Same pipeline as the other
-# kapman Fly apps (first landed in kapman-polygon-viewer#66).
+# MANUAL deploy to Fly (#42, rescoped by #46).
+#
+# This no longer runs on push. The automatic release lives in ci.yml's deploy
+# job, gated on `needs: [validate, contrast]` — because while this workflow
+# carried its own `on: push`, GitHub started it in the same instant as CI and
+# nothing made it wait, so a red validation run still shipped to production.
+#
+# What remains here is the deliberate escape hatch: workflow_dispatch only, for
+# a release someone means to make by hand — re-deploying an unchanged commit
+# after a Fly-side failure, or shipping past a known-irrelevant red gate. Using
+# it IS the decision to bypass validation. For an ordinary release, push to
+# main and let ci.yml gate it.
 #
 # Token policy: FLY_API_TOKEN must be a DEPLOY-scoped, PER-APP token —
 # `fly tokens create deploy -a kapman-fair-value-tool` — never an org-wide
@@ -7,11 +17,9 @@
 #
 # The job skips (green) while the secret is unset, so this workflow can land
 # before the token exists; deploys stay manual (`fly deploy`) until then.
-name: Fly Deploy
+name: Fly Deploy (manual)
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch: {}
 
 # one deploy at a time; a queued push waits rather than racing the machine

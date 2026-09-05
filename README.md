@@ -168,7 +168,7 @@ produces a generic letter tile. Three layers must agree, and they do today:
 1. `public/` holds `favicon.ico`, `icon.png`, `apple-touch-icon.png`,
    `icons/*`, `manifest.webmanifest` and the 256px `kapman-mark.png` master.
    Vite copies them to the `dist` root; regenerate with the recipe in
-   `kapman-tradelog/design/README.md` ("App icons"), never by re-cropping a banner.
+   `kapman-design/theme/README.md` ("App icons"), never by re-cropping a banner.
 2. `server/index.js` serves `dist` statically; the SPA fallback returns **404**
    for any path with a file extension, so a missing asset is visible as a miss
    instead of a 200 with `index.html`.

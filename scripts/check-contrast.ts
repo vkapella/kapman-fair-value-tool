@@ -21,7 +21,7 @@
  *   npm run check:contrast -- --report           # print the measured token table
  *
  * ---------------------------------------------------------------------------
- * VENDORED from kapman-tradelog/scripts/check-contrast.ts (UI-8). The walker,
+ * VENDORED from kapman-design/scripts/check-contrast.ts (formerly kapman-tradelog/scripts) (UI-8). The walker,
  * compositing, ratio maths, self-test and token table are byte-identical: fix
  * them upstream, never here.
  *

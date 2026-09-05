@@ -1370,8 +1370,17 @@ app.use(express.static(distDir, {
   },
 }));
 
-// SPA fallback (anything not /api/* falls through to index.html)
+// SPA fallback (anything not /api/* falls through to index.html) — except
+// paths that name a file. A missing asset used to come back as 200 + HTML,
+// which is how the absent touch icon hid behind a generic home-screen tile
+// (#48): iOS asked for a PNG and was handed the app shell. Client routes carry
+// no extension, so a dotted last segment is a real miss and says so.
 app.get(/^\/(?!api).*/, (req, res) => {
+  const lastSegment = req.path.slice(req.path.lastIndexOf("/") + 1);
+  if (lastSegment.includes(".")) {
+    res.status(404).type("text/plain").send("not found");
+    return;
+  }
   res.set("Cache-Control", "no-store");
   res.sendFile(path.join(distDir, "index.html"));
 });
@@ -1390,6 +1399,6 @@ app.use((error, req, res, next) => {
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Fair Value Evaluator running on :${PORT}`);
+  console.log(`Kapman Fair Value running on :${PORT}`);
   console.log(`SQLite database: ${DB_PATH}`);
 });

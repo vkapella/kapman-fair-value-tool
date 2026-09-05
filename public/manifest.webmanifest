@@ -1,0 +1,16 @@
+{
+  "id": "/",
+  "scope": "/",
+  "name": "Kapman Fair Value",
+  "short_name": "Fair Value",
+  "description": "Modified-Graham intrinsic value estimates with a manual scorecard and live price refresh.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#08090c",
+  "theme_color": "#12151c",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

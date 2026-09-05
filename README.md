@@ -159,6 +159,34 @@ Open the live app:
 fly open
 ```
 
+### Public brand assets (#48)
+
+iOS "Add to Home Screen" fetches the touch icon in a separate request that
+carries no cookies; anything that answers it with a login redirect or HTML
+produces a generic letter tile. Three layers must agree, and they do today:
+
+1. `public/` holds `favicon.ico`, `icon.png`, `apple-touch-icon.png`,
+   `icons/*`, `manifest.webmanifest` and the 256px `kapman-mark.png` master.
+   Vite copies them to the `dist` root; regenerate with the recipe in
+   `kapman-tradelog/design/README.md` ("App icons"), never by re-cropping a banner.
+2. `server/index.js` serves `dist` statically; the SPA fallback returns **404**
+   for any path with a file extension, so a missing asset is visible as a miss
+   instead of a 200 with `index.html`.
+3. Cloudflare Access bypasses the same seven paths for
+   `fairvalue.kapmancapital.com` via the shared **"Kapman public brand assets"**
+   application (explicit hostname rows; wildcard hostnames lose to the site's
+   own app). A new Kapman hostname gets seven rows there and nothing else.
+
+Verify from a terminal with no cookies — every line `200`, never a `302` to
+`cloudflareaccess.com`, never `text/html`:
+
+```bash
+for p in /apple-touch-icon.png /icon.png /favicon.ico /icons/icon-192.png /manifest.webmanifest; do curl -s -o /dev/null -w "$p %{http_code} %{content_type}\n" "https://fairvalue.kapmancapital.com$p"; done
+```
+
+After changing the icon, delete and re-add the home-screen shortcut: iOS
+keeps the tile it generated the first time.
+
 ## Editing workflow
 
 1. Clone the repo on any machine: `git clone git@github.com:YOUR_USERNAME/fair-value-evaluator.git`

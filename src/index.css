@@ -7,7 +7,7 @@
 @import "@fontsource/geist-mono/500.css";
 @import "@fontsource/geist-mono/600.css";
 
-/* Vendored KapMan theme — copied verbatim from kapman-tradelog/design/
+/* Vendored Kapman theme — copied verbatim from kapman-design/theme/
    (decision 04: changes land there first, then re-copy). kapman-ui.css loads
    before all app CSS; kapman-grid.css after it, per the theme README. Both
    must also come after AG Grid's own stylesheets, since .ag-theme-kapman and

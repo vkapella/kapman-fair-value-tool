@@ -1,7 +1,7 @@
 # Handoff — two rows for `OPEN-WITH-DESIGN.md` QUEUED
 
 **From:** kapman-fair-value-tool, session of 2026-08-31 (re-vendor at `26f4898`, decisions 49/50/51/54/55).
-**For:** the Tradelog session, which owns `design/OPEN-WITH-DESIGN.md`.
+**For:** the consolidating (Tradelog) session, which owns `kapman-design/theme/OPEN-WITH-DESIGN.md`.
 
 Both rows are already appended to that file's **QUEUED** table in the shared
 clone's working tree, directly after the em-dash row. They are staged here as

@@ -95,8 +95,14 @@ export default function Header({
     };
   }, [menuOpen]);
 
+  // Standalone iOS (display: standalone + black-translucent status bar)
+  // draws the page under the clock; the header pads the top inset the same
+  // way the tab bar and action bar pad the bottom one (#50).
   return (
-    <header className="border-b border-border bg-surface-2 backdrop-blur sticky top-0 z-20">
+    <header
+      className="border-b border-border bg-surface-2 backdrop-blur sticky top-0 z-20"
+      style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
+    >
       <div className="max-w-[1500px] mx-auto px-6 py-4 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="relative w-7 h-7 flex-none">

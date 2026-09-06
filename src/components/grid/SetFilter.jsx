@@ -114,7 +114,7 @@ export default function SetFilter({ model, onModelChange, getValue, api, colDef 
           type="button"
           onClick={apply}
           disabled={!dirty}
-          className="nav-touch px-2 py-1 rounded text-[10px] uppercase tracking-wider bg-accent text-bg disabled:opacity-40 disabled:cursor-not-allowed"
+          className="nav-touch px-2 py-1 rounded text-[10px] uppercase tracking-wider bg-accent text-text-on-fill disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Apply
         </button>

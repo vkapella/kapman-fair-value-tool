@@ -413,7 +413,7 @@ export default function App() {
             <button
               onClick={addStock}
               disabled={dataLoading || !!dataError}
-              className="w-full h-10 rounded bg-accent text-bg text-xs font-medium flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full h-10 rounded bg-accent text-text-on-fill text-xs font-medium flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Plus className="w-3.5 h-3.5" /> Add Ticker
             </button>

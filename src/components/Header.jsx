@@ -147,7 +147,7 @@ export default function Header({
           </button>
           <button onClick={refreshPrices} disabled={refreshing || dataLoading || !!dataError}
             aria-label="Refresh Prices"
-            className="px-3 py-2 rounded bg-accent hover:brightness-105 text-bg text-xs flex items-center gap-2 transition disabled:opacity-60 font-medium">
+            className="px-3 py-2 rounded bg-accent hover:brightness-105 text-text-on-fill text-xs flex items-center gap-2 transition disabled:opacity-60 font-medium">
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
             <span className="hidden sm:inline">{refreshing ? "Refreshing…" : "Refresh Prices"}</span>
           </button>

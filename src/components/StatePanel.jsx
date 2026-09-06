@@ -5,7 +5,7 @@ export default function StatePanel({ title, message, actionLabel, onAction }) {
       <p className="mt-2 text-sm text-text-3">{message}</p>
       {actionLabel && (
         <button onClick={onAction}
-          className="mt-5 px-4 py-2 rounded bg-accent hover:brightness-105 text-bg text-xs font-medium transition">
+          className="mt-5 px-4 py-2 rounded bg-accent hover:brightness-105 text-text-on-fill text-xs font-medium transition">
           {actionLabel}
         </button>
       )}

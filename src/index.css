@@ -20,6 +20,19 @@
 @tailwind components;
 @tailwind utilities;
 
+/* The theme's .km-sym-link stretches to its CELL (align-self: stretch;
+   min-height: 100%), and AG Grid's .ag-cell is inline-block, so the pinned
+   ticker cell — and only that cell — is a flex container here; every other
+   column keeps AG's layout and its right-aligned numerics. Same rule the
+   Screener ships for its symbol column (decision 64, kapman-design 239072b). */
+.ag-theme-kapman .ag-cell[col-id="ticker"],
+.ag-theme-kapman .ag-cell[col-id="ticker"] .ag-cell-wrapper,
+.ag-theme-kapman .ag-cell[col-id="ticker"] .ag-cell-value {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
 :root {
   /* --chip-w-1/2/3 come from the vendored theme (kapman-ui.css @ tradelog
      8cddb2d), reachable via the min-w-chip-* Tailwind aliases. */

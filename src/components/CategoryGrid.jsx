@@ -1,3 +1,4 @@
+import { symbolLinkProps } from "../chartUrl";
 import { Pin, PinOff } from "lucide-react";
 import FactorCell from "./cells/FactorCell.jsx";
 import JudgmentCell from "./cells/JudgmentCell.jsx";
@@ -93,7 +94,7 @@ export default function CategoryGrid({
 
               return (
                 <tr key={r.ticker} className="hairline hover:bg-surface-2 group">
-                  <td className="px-3 py-2 font-mono text-xs text-text">{r.ticker}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-text"><a {...symbolLinkProps(r.ticker)} className="km-sym-link">{r.ticker}</a></td>
                   {derived.map((field) => (
                     <td key={field.key} title={field.description} className="px-2 py-2 text-right">
                       {/* Derived cells are model output and never editable; the

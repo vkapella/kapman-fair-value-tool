@@ -117,7 +117,7 @@ export default function ImportPanel({ onImported }) {
           <button
             onClick={handlePreview}
             disabled={tickers.length === 0 || loading}
-            className="px-4 py-2 rounded bg-accent hover:brightness-105 disabled:bg-surface-3 disabled:text-text-3 disabled:cursor-not-allowed text-bg text-xs font-medium transition flex items-center gap-2"
+            className="px-4 py-2 rounded bg-accent hover:brightness-105 disabled:bg-surface-3 disabled:text-text-3 disabled:cursor-not-allowed text-text-on-fill text-xs font-medium transition flex items-center gap-2"
           >
             {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ListPlus className="w-3.5 h-3.5" />}
             Preview {tickers.length || ""} ticker{tickers.length === 1 ? "" : "s"}
@@ -209,7 +209,7 @@ export default function ImportPanel({ onImported }) {
             <button
               onClick={handleApply}
               disabled={selected.length === 0 || applying}
-              className="px-4 py-2 rounded bg-accent hover:brightness-105 disabled:bg-surface-3 disabled:text-text-3 disabled:cursor-not-allowed text-bg text-xs font-medium transition flex items-center gap-2"
+              className="px-4 py-2 rounded bg-accent hover:brightness-105 disabled:bg-surface-3 disabled:text-text-3 disabled:cursor-not-allowed text-text-on-fill text-xs font-medium transition flex items-center gap-2"
             >
               {applying && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Add {selected.length} ticker{selected.length === 1 ? "" : "s"}

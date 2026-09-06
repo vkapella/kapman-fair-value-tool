@@ -1,3 +1,4 @@
+import { symbolLinkProps } from "../chartUrl";
 import { ChevronLeft, ChevronRight, Pin, PinOff } from "lucide-react";
 import FactorCell from "./cells/FactorCell.jsx";
 import JudgmentCell from "./cells/JudgmentCell.jsx";
@@ -83,7 +84,7 @@ export default function CategorySingleTicker({
           grid shows, so the two orientations stay in step. */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-surface-2">
         <span className="km-section-label">Ticker</span>
-        <span className="font-mono text-sm font-semibold text-text">{row.ticker}</span>
+        <a {...symbolLinkProps(row.ticker)} className="km-sym-link font-mono text-sm font-semibold text-text">{row.ticker}</a>
         <span className="font-mono text-[10px] text-text-3">{activeIndex + 1} of {rows.length}</span>
         <div className="ml-auto flex items-center gap-1">
           <button

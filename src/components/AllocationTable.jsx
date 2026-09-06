@@ -1,3 +1,4 @@
+import { symbolLinkProps } from "../chartUrl";
 import { useMemo } from "react";
 import KapmanGrid from "./grid/KapmanGrid.jsx";
 import SetFilter from "./grid/SetFilter.jsx";
@@ -10,8 +11,13 @@ import { ivColor, fmtPctIV, scoreColor, missingMarkerProps } from "../lib/format
 
 // Cell text is the first thing to yield when the 76px pinned column runs out
 // (decision 50); furniture never does.
+// The ticker is the theme's .km-sym-link (decisions 64–66): it inherits the
+// cell's colour rather than reading as accent, stretches to the cell (the
+// pinned ticker cell is a flex container, see index.css), and opens the
+// Barchart chart in a new tab. Truncation stays: this is the one column that
+// cannot meet its width sum (decision 50), so its text is what yields.
 const TickerCell = ({ value }) => (
-  <span className="km-grid-col-symbol text-accent block w-full truncate">{value}</span>
+  <a {...symbolLinkProps(value)} className="km-sym-link km-grid-col-symbol truncate">{value}</a>
 );
 
 const ScoreCell = ({ value }) => (

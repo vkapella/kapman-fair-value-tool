@@ -106,11 +106,13 @@ export default function Header({
       <div className="max-w-[1500px] mx-auto px-6 py-4 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="relative w-7 h-7 flex-none">
-            {/* The commissioned mark shipped in the handoff bundle
-                (assets/kapman-mark.png), the same file the sibling apps
-                render. Decision 09's "type monogram is the shipping mark"
-                describes the fallback, not this. */}
-            <img src="/kapman-mark.png" alt="" aria-hidden="true" width={28} height={28} className="w-7 h-7 rounded-md" />
+            {/* The 28px lockup renders the SMALL mark, not the master: the
+                same K letterform with less detail, because the master's bull
+                and bear collapse into mud at this size (measured;
+                kapman-design #10, Vendor SHA cfa549f). Both are vendored from
+                kapman-design/theme/assets/ and the sibling apps render the
+                same pair. */}
+            <img src="/kapman-mark-small.png" alt="" aria-hidden="true" width={28} height={28} className="w-7 h-7 rounded-md" />
             {/* <1024px: save status collapses to a dot beside the mark; the
                 text moves to the ⋯ sheet once UI-2 builds it. */}
             {save && (
